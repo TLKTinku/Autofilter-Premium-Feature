@@ -75,7 +75,7 @@ STAR_PREMIUM_PLANS = {
 # ============================
 DATABASE_URI = environ.get('DATABASE_URI', "" )  # MongoDB URI for the database
 DATABASE_NAME = environ.get('DATABASE_NAME', "Cluster0") # Database name (default: cluster)
-COLLECTION_NAME = environ.get('COLLECTION_NAME', 'TLK_files') # Collection name (default: dreamcinezone_files)
+COLLECTION_NAME = environ.get('COLLECTION_NAME', 'royal_files) # Collection name (default: dreamcinezone_files)
 
 # If MULTIPLE_DB Is True Then Fill DATABASE_URI2 Value Else You Will Get Error.
 MULTIPLE_DB = is_enabled(os.environ.get('MULTIPLE_DB', "False"), False) # Type True For Turn On MULTIPLE DB FUNTION 
@@ -215,9 +215,9 @@ FQDN = str(getenv('FQDN', BIND_ADRESS)) if not ON_HEROKU or getenv('FQDN') else 
 URL = "https://{}/".format(FQDN) if ON_HEROKU or NO_PORT else "https://{}/".format(FQDN, PORT)
 SLEEP_THRESHOLD = int(environ.get('SLEEP_THRESHOLD', '60'))
 WORKERS = int(environ.get('WORKERS', '4'))
-SESSION_NAME = str(environ.get('SESSION_NAME', 'TLKfiles'))
+SESSION_NAME = str(environ.get('SESSION_NAME', 'DreamXBotz)
 MULTI_CLIENT = False
-name = str(environ.get('name', 'My Movies Offical'))
+name = str(environ.get('name', 'DreamXBotz'))
 PING_INTERVAL = int(environ.get("PING_INTERVAL", "1200"))  # 20 minutes
 if 'DYNO' in environ:
     ON_HEROKU = True
