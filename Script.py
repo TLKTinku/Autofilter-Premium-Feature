@@ -163,6 +163,14 @@ Nᴀᴍᴇ - {}
 
 🚯 ᴅᴏɴᴛ ᴜꜱᴇ ➠ ':(!,./)</b>"""
     
+    REQUEST_OWNER_TXT = """<b>This movie/series is not available in my database.</b>
+
+If your spelling is correct and it's still not found, please request the owner using the button below, then try again after some time."""
+
+    REQUEST_SENT_TXT = """<b>Your request has been sent to the owner.
+
+Please wait, it will be added soon.</b>"""
+
     I_CUD_NT = """<b>ɪ ᴄᴏᴜʟᴅɴ'ᴛ ꜰɪɴᴅ ᴀɴʏ ᴍᴏᴠɪᴇ ʀᴇʟᴀᴛᴇᴅ ᴛᴏ {}.
 
 ᴍᴏᴠɪᴇ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ ʀᴇᴀsᴏɴ :
