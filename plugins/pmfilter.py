@@ -36,6 +36,7 @@ BUTTONS0 = {}
 BUTTONS1 = {}
 BUTTONS2 = {}
 SPELL_CHECK = {}
+OWNER_REQ_CACHE = {}
 
 
 @Client.on_message(filters.group & filters.text & filters.incoming)
@@ -834,6 +835,47 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
     await query.answer()
 
 
+
+@Client.on_callback_query(filters.regex(r"^reqowner#"))
+async def request_owner_cb(client, query: CallbackQuery):
+    try:
+        _, req_key = query.data.split("#", 1)
+    except ValueError:
+        return await query.answer("Invalid request.", show_alert=True)
+
+    cached = OWNER_REQ_CACHE.get(req_key)
+    if not cached:
+        return await query.answer("This request has expired. Please search again.", show_alert=True)
+
+    content = cached["query"]
+    reporter = str(cached["user_id"])
+    mention = cached.get("mention", "User")
+
+    if OWNER_CHAT_GROUP is None:
+        return await query.answer("Request system is not configured. Contact admin.", show_alert=True)
+
+    try:
+        await client.send_message(
+            chat_id=OWNER_CHAT_GROUP,
+            text=(
+                f"<b>📝 Movie/Series Request</b>\n\n"
+                f"🎬 Query : <code>{content}</code>\n"
+                f"👤 Requested by : {mention}\n"
+                f"🆔 User id : <code>{reporter}</code>"
+            )
+        )
+    except Exception as e:
+        logger.exception("Failed to forward owner request: %s", e)
+        return await query.answer("Failed to send request. Try again later.", show_alert=True)
+
+    OWNER_REQ_CACHE.pop(req_key, None)
+    try:
+        await query.message.edit_text(script.REQUEST_SENT_TXT)
+    except Exception:
+        pass
+    await query.answer("Request sent to the owner!", show_alert=True)
+
+
 @Client.on_callback_query()
 async def cb_handler(client: Client, query: CallbackQuery):
     DreamxData = query.data
@@ -1236,7 +1278,12 @@ async def cb_handler(client: Client, query: CallbackQuery):
             InlineKeyboardButton(
                 "🟢 ᴜᴘʟᴏᴀᴅᴇᴅ 🟢", callback_data=f"upalert#{from_user}")
         ]]
+        movie_name = extract_request_content(query.message.text)
+        deep_payload = re.sub(r'[^A-Za-z0-9]+', '-', movie_name).strip('-')
+        getfile_link = f"https://t.me/{temp.U_NAME}?start=getfile-{deep_payload}"
         btn2 = [[
+            InlineKeyboardButton("📥 ɢᴇᴛ ꜰɪʟᴇ ɪɴ ᴘᴍ 📥", url=getfile_link)
+        ], [
             InlineKeyboardButton('ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ', url=link.invite_link),
             InlineKeyboardButton("ᴠɪᴇᴡ ꜱᴛᴀᴛᴜꜱ", url=f"{query.message.link}")
         ], [
@@ -1282,7 +1329,12 @@ async def cb_handler(client: Client, query: CallbackQuery):
             InlineKeyboardButton("♻️ ᴀʟʀᴇᴀᴅʏ ᴀᴠᴀɪʟᴀʙʟᴇ ♻️",
                                  callback_data=f"alalert#{from_user}")
         ]]
+        movie_name = extract_request_content(query.message.text)
+        deep_payload = re.sub(r'[^A-Za-z0-9]+', '-', movie_name).strip('-')
+        getfile_link = f"https://t.me/{temp.U_NAME}?start=getfile-{deep_payload}"
         btn2 = [[
+            InlineKeyboardButton("📥 ɢᴇᴛ ꜰɪʟᴇ ɪɴ ᴘᴍ 📥", url=getfile_link)
+        ], [
             InlineKeyboardButton('ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ', url=link.invite_link),
             InlineKeyboardButton("ᴠɪᴇᴡ ꜱᴛᴀᴛᴜꜱ", url=f"{query.message.link}")
         ], [
@@ -2057,8 +2109,24 @@ async def advantage_spell_chok(client, message):
         button = [[InlineKeyboardButton(
             "🔍 ᴄʜᴇᴄᴋ sᴘᴇʟʟɪɴɢ ᴏɴ ɢᴏᴏɢʟᴇ 🔍", url=f"https://www.google.com/search?q={google}")]]
         k = await message.reply_text(text=script.I_CUDNT.format(search), reply_markup=InlineKeyboardMarkup(button))
+
+        req_key = f"{chat_id}-{mv_id}"
+        OWNER_REQ_CACHE[req_key] = {
+            "query": search,
+            "user_id": message.from_user.id if message.from_user else 0,
+            "mention": message.from_user.mention if message.from_user else "User",
+        }
+        req_button = [[InlineKeyboardButton(
+            "📩 Request Owner", callback_data=f"reqowner#{req_key}")]]
+        r = await message.reply_text(text=script.REQUEST_OWNER_TXT, reply_markup=InlineKeyboardMarkup(req_button))
+
         await asyncio.sleep(60)
         await k.delete()
+        try:
+            await r.delete()
+        except:
+            pass
+        OWNER_REQ_CACHE.pop(req_key, None)
         try:
             await message.delete()
         except:
