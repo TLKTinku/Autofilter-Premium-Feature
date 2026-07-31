@@ -18,7 +18,7 @@ from pyrogram.errors import FloodWait, ChatAdminRequired, UserNotParticipant
 from database.ia_filterdb import Media, Media2, get_file_details, unpack_new_file_id, get_bad_files
 from database.users_chats_db import db
 from info import *
-from utils import get_settings, save_group_settings, is_subscribed, is_req_subscribed, get_size, get_shortlink, is_check_admin, temp, get_readable_time, get_time, generate_settings_text, log_error, clean_filename
+from utils import get_settings, save_group_settings, is_subscribed, is_req_subscribed, get_size, get_shortlink, is_check_admin, temp, get_readable_time, get_time, generate_settings_text, log_error, clean_filename, format_file_caption
 import time
 
 
@@ -335,7 +335,7 @@ async def start(client, message):
                 DREAMX_CAPTION = settings.get('caption', CUSTOM_FILE_CAPTION)
                 if DREAMX_CAPTION:
                     try:
-                        f_caption=DREAMX_CAPTION.format(file_name= '' if title is None else title, file_size='' if size is None else size, file_caption='' if f_caption is None else f_caption)
+                        f_caption = format_file_caption(DREAMX_CAPTION, title, size, f_caption)
                     except Exception as e:
                         logger.exception(e)
                         f_caption = f_caption
@@ -421,7 +421,7 @@ async def start(client, message):
             DREAMX_CAPTION = settings.get('caption', CUSTOM_FILE_CAPTION)
             if DREAMX_CAPTION:
                 try:
-                    f_caption=DREAMX_CAPTION.format(file_name= '' if title is None else title, file_size='' if size is None else size, file_caption='')
+                    f_caption = format_file_caption(DREAMX_CAPTION, title, size, '')
                 except:
                     return
             await msg.edit_caption(
@@ -448,7 +448,7 @@ async def start(client, message):
     DREAMX_CAPTION = settings.get('caption', CUSTOM_FILE_CAPTION)
     if DREAMX_CAPTION:
         try:
-            f_caption=DREAMX_CAPTION.format(file_name= '' if title is None else title, file_size='' if size is None else size, file_caption='' if f_caption is None else f_caption)
+            f_caption = format_file_caption(DREAMX_CAPTION, title, size, f_caption)
         except Exception as e:
             logger.exception(e)
             f_caption = f_caption
