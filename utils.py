@@ -435,6 +435,7 @@ LANGUAGE_PATTERNS = {
 }
 
 def extract_language(text):
+    # Fixed, permanent behaviour: always prefix each detected language with '#'
     if not text:
         return "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ"
     low = text.lower()
@@ -442,18 +443,56 @@ def extract_language(text):
     for key, label in LANGUAGE_PATTERNS.items():
         if key in low and label not in found:
             found.append(label)
-    return ", ".join(found) if found else "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ"
+    return ", ".join(f"#{l}" for l in found) if found else "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ"
+
+# ---- Permanent, global caption-cleaning rules (same for every group/channel) ----
+EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "\U00002700-\U000027BF"
+    "\U0001F900-\U0001F9FF"
+    "]+", flags=re.UNICODE
+)
+
+# Words/patterns that must NEVER be broken apart by symbol-replacement
+PROTECTED_PATTERNS = re.compile(r'\.mkv|\.mp4|5\.1', re.IGNORECASE)
+
+# Symbols that get replaced with a space (outside protected patterns)
+SYMBOL_PATTERN = re.compile(r'[_\-.@#()\[\]]')
 
 def clean_display_name(file_name, f_caption):
     source = f_caption if f_caption else file_name
     if not source:
         return ""
-    source = re.sub(r'(https?://\S+|t\.me/\S+)', '', source, flags=re.IGNORECASE)
+
+    # 1) Remove links/usernames (always, permanently)
+    source = re.sub(r'(https?://\S+|t\.me/\S+|www\.\S+)', '', source, flags=re.IGNORECASE)
     source = re.sub(r'@\w+', '', source)
-    source = re.sub(r'\.(mkv|mp4|avi|webm|mov|m4v)$', '', source, flags=re.IGNORECASE)
+
+    # 2) Remove emojis
+    source = EMOJI_PATTERN.sub('', source)
+
+    # 3) Remove known promo/channel words
     source = clean_filename(source)
-    source = re.sub(r'\s+', ' ', source).strip(" -|:.")
-    return source or (file_name or "")
+
+    # 4) Replace symbols with spaces, but protect certain patterns (.mkv, .mp4, 5.1)
+    placeholders = {}
+    def _mask(m):
+        key = f"\x00{len(placeholders)}\x00"
+        placeholders[key] = m.group(0)
+        return key
+    source = PROTECTED_PATTERNS.sub(_mask, source)
+    source = SYMBOL_PATTERN.sub(' ', source)
+    for key, val in placeholders.items():
+        source = source.replace(key, val)
+
+    # 5) Collapse multiple spaces into one, drop empty lines
+    source = "\n".join(
+        re.sub(r'\s+', ' ', line).strip() for line in source.splitlines() if line.strip()
+    )
+    return source.strip(" -|:.") or (file_name or "")
 
 def format_file_caption(template, title, size, f_caption):
     display_name = clean_display_name(title, f_caption)
@@ -468,7 +507,7 @@ def format_file_caption(template, title, size, f_caption):
             quality=quality,
             language=language,
             duration="Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ",
-            grp_lnk=GRP_LNK,
+            grp_lnk=BACKUP_CHANNEL_LINK,
         )
     except Exception as e:
         logging.error(f"Error formatting file caption: {e}")
