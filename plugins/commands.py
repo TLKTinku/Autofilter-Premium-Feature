@@ -332,7 +332,7 @@ async def start(client, message):
                 size = get_size(files1.file_size)
                 f_caption = files1.caption
                 settings = await get_settings(int(grp_id))
-                DREAMX_CAPTION = settings.get('caption', CUSTOM_FILE_CAPTION)
+                DREAMX_CAPTION = CUSTOM_FILE_CAPTION  # Always use the fixed global caption, ignore any per-group saved caption
                 if DREAMX_CAPTION:
                     try:
                         f_caption = format_file_caption(DREAMX_CAPTION, title, size, f_caption)
@@ -418,7 +418,7 @@ async def start(client, message):
             size=get_size(file.file_size)
             f_caption = f"<code>{title}</code>"
             settings = await get_settings(int(grp_id))
-            DREAMX_CAPTION = settings.get('caption', CUSTOM_FILE_CAPTION)
+            DREAMX_CAPTION = CUSTOM_FILE_CAPTION  # Always use the fixed global caption, ignore any per-group saved caption
             if DREAMX_CAPTION:
                 try:
                     f_caption = format_file_caption(DREAMX_CAPTION, title, size, '')
@@ -445,7 +445,7 @@ async def start(client, message):
     size = get_size(files.file_size)
     f_caption = files.caption
     settings = await get_settings(int(grp_id))            
-    DREAMX_CAPTION = settings.get('caption', CUSTOM_FILE_CAPTION)
+    DREAMX_CAPTION = CUSTOM_FILE_CAPTION  # Always use the fixed global caption, ignore any per-group saved caption
     if DREAMX_CAPTION:
         try:
             f_caption = format_file_caption(DREAMX_CAPTION, title, size, f_caption)
