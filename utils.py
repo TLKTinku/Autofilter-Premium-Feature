@@ -411,6 +411,69 @@ def clean_filename(file_name):
     )
     return file_name
 
+QUALITY_PATTERNS = [
+    '2160p', '4k', '1080p', '720p', '480p', '360p', 'hdrip', 'webrip',
+    'web-dl', 'webdl', 'bluray', 'brrip', 'dvdrip', 'hdtv', 'pre-dvd',
+    'hdcam', 'camrip', 'hdrip',
+]
+
+def extract_quality(text):
+    if not text:
+        return "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ"
+    low = text.lower()
+    for pat in QUALITY_PATTERNS:
+        if pat in low:
+            return pat.upper()
+    return "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ"
+
+LANGUAGE_PATTERNS = {
+    'hindi': 'Hindi', 'english': 'English', 'tamil': 'Tamil', 'telugu': 'Telugu',
+    'malayalam': 'Malayalam', 'kannada': 'Kannada', 'bengali': 'Bengali',
+    'marathi': 'Marathi', 'punjabi': 'Punjabi', 'gujarati': 'Gujarati',
+    'dual audio': 'Dual Audio', 'multi audio': 'Multi Audio', 'korean': 'Korean',
+    'japanese': 'Japanese', 'spanish': 'Spanish', 'french': 'French',
+}
+
+def extract_language(text):
+    if not text:
+        return "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ"
+    low = text.lower()
+    found = []
+    for key, label in LANGUAGE_PATTERNS.items():
+        if key in low and label not in found:
+            found.append(label)
+    return ", ".join(found) if found else "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ"
+
+def clean_display_name(file_name, f_caption):
+    source = f_caption if f_caption else file_name
+    if not source:
+        return ""
+    source = re.sub(r'(https?://\S+|t\.me/\S+)', '', source, flags=re.IGNORECASE)
+    source = re.sub(r'@\w+', '', source)
+    source = re.sub(r'\.(mkv|mp4|avi|webm|mov|m4v)$', '', source, flags=re.IGNORECASE)
+    source = clean_filename(source)
+    source = re.sub(r'\s+', ' ', source).strip(" -|:.")
+    return source or (file_name or "")
+
+def format_file_caption(template, title, size, f_caption):
+    display_name = clean_display_name(title, f_caption)
+    search_text = f"{f_caption or ''} {title or ''}"
+    quality = extract_quality(search_text)
+    language = extract_language(search_text)
+    try:
+        return template.format(
+            file_name=display_name,
+            file_size='' if size is None else size,
+            file_caption='' if f_caption is None else f_caption,
+            quality=quality,
+            language=language,
+            duration="Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ",
+            grp_lnk=GRP_LNK,
+        )
+    except Exception as e:
+        logging.error(f"Error formatting file caption: {e}")
+        return display_name
+
 def get_size(size):
     units = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB"]
     size = float(size)
