@@ -241,7 +241,7 @@ Mᴇꜱꜱᴀɢᴇ : <b>{}</b>"""
 <b>Qᴜᴀʟɪᴛʏ :</b> {quality}
 <b>Dᴜʀᴀᴛɪᴏɴ :</b> {duration}
 
-<b>⚜️ Powered By : <a href="{BACKUP_CHANNEL_LINK}">My Movies Official ✓✓</a></b>"""
+<b>⚜️ Powered By : My Movies Offical ✓✓</b>"""
 
     
     MOVIE_UPDATE_NOTIFY_TXT = """
