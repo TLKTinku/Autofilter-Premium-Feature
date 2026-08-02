@@ -234,14 +234,14 @@ Nᴀᴍᴇ : {}
 
 Mᴇꜱꜱᴀɢᴇ : <b>{}</b>"""
     
-    CAPTION = """<b>Nᴀᴍᴇ :</b> <a href="{grp_lnk}"><code>{file_name}</code></a>
+    CAPTION = """<b>Nᴀᴍᴇ :</b> <a href="{GRP_LNK}"><code>{file_name}</code></a>
 
 <b>Lᴀɴɢᴜᴀɢᴇ :</b> {language}
 <b>Sɪᴢᴇ :</b> {file_size}
 <b>Qᴜᴀʟɪᴛʏ :</b> {quality}
 <b>Dᴜʀᴀᴛɪᴏɴ :</b> {duration}
 
-<b>⚜️ Powered By : My Movies Offical ✓✓</b>"""
+<b>⚜️ Powered By : <a href="{BACKUP_CHANNEL_LINK}">My Movies Official ✓✓</a></b>"""
 
     
     MOVIE_UPDATE_NOTIFY_TXT = """
