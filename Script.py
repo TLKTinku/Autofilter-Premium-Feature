@@ -234,7 +234,7 @@ Nᴀᴍᴇ : {}
 
 Mᴇꜱꜱᴀɢᴇ : <b>{}</b>"""
     
-    CAPTION = """<b>Nᴀᴍᴇ :</b> <a href="{grp_lnk}"><code>{file_name}</code></a>
+    CAPTION = """<b>Nᴀᴍᴇ :</b> <a href="{grp_lnk}">{file_name}</a>
 
 <b>Lᴀɴɢᴜᴀɢᴇ :</b> {language}
 <b>Sɪᴢᴇ :</b> {file_size}
