@@ -417,8 +417,9 @@ sʜᴏᴡɴ ɪɴ : {remaining_seconds} <i>sᴇᴄ</i>⚡️
 
     SOURCE_TXT ="""<b>ՏOᑌᖇᑕᗴ ᑕOᗪᗴ : 👇 </b>
 
-This Is An Open-Source Project. You Can Use It Freely, But Selling The Source Code Is Strictly Prohibited.\n
-ꜱᴏᴜʀᴄᴇ ᴄᴏᴅᴇ ʜᴇʀᴇ ◉› :<a href=https://github.com>Royal</a>\n """
+Tʜɪs ɪs ᴀ ᴘʀɪᴠᴀᴛᴇ sᴏᴜʀᴄᴇ ᴘʀᴏᴊᴇᴄᴛ. Yᴏᴜ ᴄᴀɴɴᴏᴛ ᴜsᴇ ɪᴛ ꜰʀᴇᴇʟʏ; ʏᴏᴜ ᴍᴜsᴛ ᴄᴏɴᴛᴀᴄᴛ ᴛʜᴇ ᴏᴡɴᴇʀ ᴛᴏ ᴘᴜʀᴄʜᴀsᴇ ᴛʜᴇ sᴏᴜʀᴄᴇ ᴄᴏᴅᴇ.
+
+Tʜᴇ ᴏᴡɴᴇʀ / Dᴇᴠᴇʟᴏᴘᴇʀ ɪs ʜᴇʀᴇ ◉› : <a href={}>ᴏᴡɴᴇʀ</a> """
 
     SETTING_TXT = """    
 <u>ꜱᴇᴛᴛɪɴɢꜱ</u> :
