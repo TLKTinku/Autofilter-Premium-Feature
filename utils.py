@@ -507,7 +507,8 @@ def format_file_caption(template, title, size, f_caption):
             quality=quality,
             language=language,
             duration="Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ",
-            grp_lnk=BACKUP_CHANNEL_LINK,
+            grp_lnk=GRP_LNK,
+            BACKUP_CHANNEL_LINK=BACKUP_CHANNEL_LINK,
         )
     except Exception as e:
         logging.error(f"Error formatting file caption: {e}")
