@@ -292,8 +292,10 @@ async def start(client, message):
                 else:
                     raw_link = f"https://telegram.me/{temp.U_NAME}?start=notcopy_{user_id}_{verify_id}_{file_id}"
                 verify = await get_shortlink(raw_link, grp_id, is_second_shortener, is_third_shortener)
-                print(f"DEBUG Shortlink result: {repr(verify)}")
-                if not verify or not str(verify).startswith("http"):
+                if verify:
+                    verify = str(verify).strip()
+                print(f"DEBUG Shortlink result: {repr(verify)} | length={len(verify) if verify else 0} | bytes={verify.encode('utf-8') if verify else None}")
+                if not verify or not verify.startswith("http"):
                     print(f"WARNING: Shortener returned invalid link ({repr(verify)}), falling back to raw link")
                     verify = raw_link
                 if is_third_shortener:
@@ -1115,6 +1117,19 @@ async def handle_shortner_command(c, m, shortner_key, api_key, log_prefix, fallb
         await save_group_settings(grp_id, shortner_key, URL)
         await save_group_settings(grp_id, api_key, API)
         await m.reply_text(f"<b><u>✅ sʜᴏʀᴛɴᴇʀ ᴀᴅᴅᴇᴅ</u>\n\nꜱɪᴛᴇ - `{URL}`\nᴀᴘɪ - `{API}`</b>")
+    except Exception as e:
+        await save_group_settings(grp_id, shortner_key, fallback_url)
+        await save_group_settings(grp_id, api_key, fallback_api)
+        await m.reply_text(
+            f"<b><u>💢 ᴇʀʀᴏʀ ᴏᴄᴄᴜʀᴇᴅ!</u>\n\n"
+            f"ᴅᴇꜰᴀᴜʟᴛ ꜱʜᴏʀᴛɴᴇʀ ᴀᴘᴘʟɪᴇᴅ\n"
+            f"ɪꜰ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴄʜᴀɴɢᴇ ᴛʀʏ ᴀ ᴠᴀʟɪᴅ ꜱɪᴛᴇ ᴀɴᴅ ᴀᴘɪ ᴋᴇʏ.\n\n"
+            f"ʟɪᴋᴇ:\n\n`/{m.command[0]} mdiskshortner.link your_api_key_here`\n\n"
+            f"💔 ᴇʀʀᴏʀ - <code>{e}</code></b>"
+        )
+        return
+    # Optional: notify the log channel. This must never undo the settings saved above.
+    try:
         user_id = m.from_user.id
         user_info = f"@{m.from_user.username}" if m.from_user.username else f"{m.from_user.mention}"
         link = (await c.get_chat(m.chat.id)).invite_link
@@ -1126,15 +1141,7 @@ async def handle_shortner_command(c, m, shortner_key, api_key, log_prefix, fallb
         )
         await c.send_message(LOG_API_CHANNEL, log_message, disable_web_page_preview=True)
     except Exception as e:
-        await save_group_settings(grp_id, shortner_key, fallback_url)
-        await save_group_settings(grp_id, api_key, fallback_api)
-        await m.reply_text(
-            f"<b><u>💢 ᴇʀʀᴏʀ ᴏᴄᴄᴜʀᴇᴅ!</u>\n\n"
-            f"ᴅᴇꜰᴀᴜʟᴛ ꜱʜᴏʀᴛɴᴇʀ ᴀᴘᴘʟɪᴇᴅ\n"
-            f"ɪꜰ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴄʜᴀɴɢᴇ ᴛʀʏ ᴀ ᴠᴀʟɪᴅ ꜱɪᴛᴇ ᴀɴᴅ ᴀᴘɪ ᴋᴇʏ.\n\n"
-            f"ʟɪᴋᴇ:\n\n`/{m.command[0]} mdiskshortner.link your_api_key_here`\n\n"
-            f"💔 ᴇʀʀᴏʀ - <code>{e}</code></b>"
-        )
+        print(f"Non-critical: failed to send shortener log to LOG_API_CHANNEL: {e}")
 
 @Client.on_message(filters.command('set_shortner'))
 async def set_shortner(c, m):
