@@ -272,14 +272,18 @@ async def start(client, message):
 
 
     user_id = m.from_user.id
-    if not await db.has_premium_access(user_id):
+    has_premium = await db.has_premium_access(user_id)
+    print(f"DEBUG VERIFY CHECK for user {user_id}: has_premium_access={has_premium}")
+    if not has_premium:
         try:
             grp_id = int(grp_id)
             user_verified = await db.is_user_verified(user_id)
             settings = await get_settings(grp_id)
             is_second_shortener = await db.use_second_shortener(user_id, settings.get('verify_time', TWO_VERIFY_GAP)) 
             is_third_shortener = await db.use_third_shortener(user_id, settings.get('third_verify_time', THREE_VERIFY_GAP))
-            if settings.get("is_verify", IS_VERIFY) and (not user_verified or is_second_shortener or is_third_shortener):
+            is_verify_setting = settings.get("is_verify", IS_VERIFY)
+            print(f"DEBUG VERIFY CHECK: grp_id={grp_id} is_verify_setting={is_verify_setting} user_verified={user_verified} is_second_shortener={is_second_shortener} is_third_shortener={is_third_shortener}")
+            if is_verify_setting and (not user_verified or is_second_shortener or is_third_shortener):
                 verify_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=7))
                 await db.create_verify_id(user_id, verify_id)
                 temp.VERIFICATIONS[user_id] = grp_id
