@@ -284,9 +284,14 @@ async def start(client, message):
                 await db.create_verify_id(user_id, verify_id)
                 temp.VERIFICATIONS[user_id] = grp_id
                 if message.command[1].startswith('allfiles'):
-                    verify = await get_shortlink(f"https://telegram.me/{temp.U_NAME}?start=sendall_{user_id}_{verify_id}_{file_id}", grp_id, is_second_shortener, is_third_shortener)
+                    raw_link = f"https://telegram.me/{temp.U_NAME}?start=sendall_{user_id}_{verify_id}_{file_id}"
                 else:
-                    verify = await get_shortlink(f"https://telegram.me/{temp.U_NAME}?start=notcopy_{user_id}_{verify_id}_{file_id}", grp_id, is_second_shortener, is_third_shortener)
+                    raw_link = f"https://telegram.me/{temp.U_NAME}?start=notcopy_{user_id}_{verify_id}_{file_id}"
+                verify = await get_shortlink(raw_link, grp_id, is_second_shortener, is_third_shortener)
+                print(f"DEBUG Shortlink result: {repr(verify)}")
+                if not verify or not str(verify).startswith("http"):
+                    print(f"WARNING: Shortener returned invalid link ({repr(verify)}), falling back to raw link")
+                    verify = raw_link
                 if is_third_shortener:
                     howtodownload = settings.get('tutorial_3', TUTORIAL_3)
                 else:
@@ -1293,6 +1298,25 @@ async def verify(bot, message):
                 return await message.reply_text("ʜɪ, ᴛᴏ ᴇɴᴀʙʟᴇ ᴠᴇʀɪꜰʏ, ᴜsᴇ <code>/verify on</code> ᴀɴᴅ ᴛᴏ ᴅɪsᴀʙʟᴇ ᴠᴇʀɪꜰʏ, ᴜsᴇ <code>/verify off</code>.")
     except Exception as e:
         print(f"Error: {e}")
+        await message.reply_text(f"Error: {e}")
+
+@Client.on_message(filters.command('resetverify') & filters.user(ADMINS))
+async def resetverify(client, message):
+    try:
+        if len(message.command) > 1:
+            target_id = int(message.command[1])
+        elif message.reply_to_message:
+            target_id = message.reply_to_message.from_user.id
+        else:
+            target_id = message.from_user.id
+        old_date = datetime(2018, 1, 1, 0, 0, 0, tzinfo=pytz.timezone('Asia/Kolkata'))
+        await db.update_notcopy_user(target_id, {
+            "last_verified": old_date,
+            "second_time_verified": old_date,
+            "third_time_verified": old_date,
+        })
+        await message.reply_text(f"✅ Verification reset for <code>{target_id}</code>. Ab dobara verify karna padega.")
+    except Exception as e:
         await message.reply_text(f"Error: {e}")
 
 @Client.on_message(filters.command('set_fsub'))
