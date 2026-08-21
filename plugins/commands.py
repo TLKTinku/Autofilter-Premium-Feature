@@ -1414,3 +1414,59 @@ async def reset_trial(client, message):
         await message.reply_text(message_text)
     except Exception as e:
         await message.reply_text(f"An error occurred: {e}")
+
+
+@Client.on_message(filters.command('userbot_backfill') & filters.user(ADMINS))
+async def userbot_backfill_cmd(client, message):
+    from userbot_index import userbot, backfill_channel, INDEXED_CHAT_IDS
+    if not userbot or not userbot.is_connected:
+        return await message.reply_text(
+            "❌ Userbot is not running. Set USER_SESSION and USERBOT_CHANNELS on Render first, then redeploy."
+        )
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "Usage:\n<code>/userbot_backfill -1001234567890</code>\n\n"
+            f"Channels the userbot currently has access to: <code>{', '.join(str(c) for c in INDEXED_CHAT_IDS) or 'none yet'}</code>\n\n"
+            "Check progress anytime with <code>/userbot_status -1001234567890</code>"
+        )
+    try:
+        chat_id = int(message.command[1])
+    except ValueError:
+        chat_id = message.command[1]
+
+    status = await message.reply_text(
+        "⏳ Starting/resuming full-history backfill... this can take a long time for large channels.\n\n"
+        "It's SAFE to restart the bot anytime — it will pick up from where it left off, not from scratch.\n"
+        f"Check progress anytime with:\n<code>/userbot_status {chat_id}</code>"
+    )
+
+    async def _run():
+        try:
+            scanned, saved, skipped = await backfill_channel(chat_id)
+            await status.edit_text(
+                f"✅ Backfill complete!\n\nScanned: <code>{scanned}</code>\nNewly saved: <code>{saved}</code>\nAlready existed/skipped: <code>{skipped}</code>"
+            )
+        except Exception as e:
+            await status.edit_text(f"❌ Backfill failed: {e}\n\nDon't worry, progress is saved — just run /userbot_backfill {chat_id} again to resume.")
+
+    client.loop.create_task(_run())
+
+
+@Client.on_message(filters.command('userbot_status') & filters.user(ADMINS))
+async def userbot_status_cmd(client, message):
+    from userbot_index import _get_progress
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: <code>/userbot_status -1001234567890</code>")
+    try:
+        chat_id = int(message.command[1])
+    except ValueError:
+        chat_id = message.command[1]
+    p = await _get_progress(chat_id)
+    await message.reply_text(
+        f"📊 <b>Backfill status for</b> <code>{chat_id}</code>\n\n"
+        f"Status: <code>{p.get('status', 'not_started')}</code>\n"
+        f"Currently at message id: <code>{p.get('last_message_id', 0)}</code>\n"
+        f"Scanned: <code>{p.get('scanned', 0)}</code>\n"
+        f"Saved: <code>{p.get('saved', 0)}</code>\n"
+        f"Skipped (duplicates): <code>{p.get('skipped', 0)}</code>"
+    )
