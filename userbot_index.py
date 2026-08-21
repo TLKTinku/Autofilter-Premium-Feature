@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, UserAlreadyParticipant, InviteHashExpired
 
@@ -18,6 +19,18 @@ INDEXED_CHAT_IDS = set()
 
 # Control flags for active backfills: chat_id -> "running" | "paused" | "stop"
 BACKFILL_CONTROL = {}
+
+
+def _clean_caption(text):
+    """Strip links, @mentions and t.me references from a caption before re-posting it."""
+    if not text:
+        return None
+    text = str(text)
+    text = re.sub(r'(https?://\S+|t\.me/\S+|www\.\S+)', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'@\w+', '', text)
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+    return text.strip() or None
 
 
 async def _get_progress(chat_id):
@@ -91,7 +104,7 @@ async def backfill_channel(chat_id, resume=True):
         media = message.video or message.document
         if media:
             try:
-                await message.forward(USERBOT_BACKUP_CHANNEL)
+                await message.copy(USERBOT_BACKUP_CHANNEL, caption=_clean_caption(message.caption))
                 forwarded_count += 1
                 await asyncio.sleep(1.2)  # gentle pacing to avoid flood limits
             except FloodWait as e:
@@ -139,8 +152,8 @@ async def start_userbot():
         if not USERBOT_BACKUP_CHANNEL:
             return
         try:
-            await message.forward(USERBOT_BACKUP_CHANNEL)
-            logger.info(f"[USERBOT-LIVE] Forwarded new file: {getattr(message.video or message.document, 'file_name', '?')}")
+            await message.copy(USERBOT_BACKUP_CHANNEL, caption=_clean_caption(message.caption))
+            logger.info(f"[USERBOT-LIVE] Copied new file: {getattr(message.video or message.document, 'file_name', '?')}")
         except Exception as e:
             logger.error(f"[USERBOT-LIVE] Failed to forward message {message.id}: {e}")
 
