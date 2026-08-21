@@ -19,6 +19,7 @@ from plugins import web_server, check_expired_premium, keep_alive
 from dreamxbotz.Bot import dreamxbotz
 from dreamxbotz.util.keepalive import ping_server
 from dreamxbotz.Bot.clients import initialize_clients
+from userbot_index import start_userbot
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 500_000_000
 
@@ -72,6 +73,7 @@ async def dreamxbotz_start():
     temp.B_LINK = me.mention
     dreamxbotz.username = '@' + me.username
     dreamxbotz.loop.create_task(check_expired_premium(dreamxbotz))
+    dreamxbotz.loop.create_task(start_userbot())
     logging.info(f"{me.first_name} with Pyrogram v{__version__} (Layer {layer}) started on {me.username}.")
     logging.info(LOG_STR)
     logging.info(script.LOGO)

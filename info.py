@@ -20,6 +20,8 @@ def is_enabled(value, default):
 SESSION = environ.get('SESSION', 'TLK_search')   # Session name for the bot
 API_ID = int(environ.get('API_ID', '' )) # API ID from my.telegram.org
 API_HASH = environ.get('API_HASH', '' )  # API Hash from my.telegram.org
+USER_SESSION = environ.get('USER_SESSION', '')  # Pyrogram session string of your PERSONAL account, only needed to index channels you can't add the bot to
+USERBOT_CHANNELS = environ.get('USERBOT_CHANNELS', '').split()  # space-separated invite links or channel IDs the userbot should join & index
 BOT_TOKEN = environ.get('BOT_TOKEN', "" )    # Bot token from @BotFather
 
 # ============================
