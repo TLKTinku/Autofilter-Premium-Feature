@@ -22,6 +22,8 @@ API_ID = int(environ.get('API_ID', '' )) # API ID from my.telegram.org
 API_HASH = environ.get('API_HASH', '' )  # API Hash from my.telegram.org
 USER_SESSION = environ.get('USER_SESSION', '')  # Pyrogram session string of your PERSONAL account, only needed to index channels you can't add the bot to
 USERBOT_CHANNELS = environ.get('USERBOT_CHANNELS', '').split()  # space-separated invite links or channel IDs the userbot should join & index
+userbot_backup_channel = environ.get('USERBOT_BACKUP_CHANNEL', '')  # YOUR OWN private channel (bot must be admin here) where the userbot forwards files it finds
+USERBOT_BACKUP_CHANNEL = int(userbot_backup_channel) if userbot_backup_channel and id_pattern.search(userbot_backup_channel) else None
 BOT_TOKEN = environ.get('BOT_TOKEN', "" )    # Bot token from @BotFather
 
 # ============================

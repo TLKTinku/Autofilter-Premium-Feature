@@ -3,8 +3,7 @@ import logging
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, UserAlreadyParticipant, InviteHashExpired
 
-from info import API_ID, API_HASH, USER_SESSION, USERBOT_CHANNELS, ADMINS
-from database.ia_filterdb import save_file
+from info import API_ID, API_HASH, USER_SESSION, USERBOT_CHANNELS, USERBOT_BACKUP_CHANNEL
 from database.users_chats_db import db
 
 logger = logging.getLogger(__name__)
@@ -14,13 +13,16 @@ userbot = (
     if USER_SESSION else None
 )
 
-# Chats the userbot has successfully joined/accessed, so live indexing knows which ones are "ours"
+# Chats the userbot has successfully joined/accessed
 INDEXED_CHAT_IDS = set()
+
+# Control flags for active backfills: chat_id -> "running" | "paused" | "stop"
+BACKFILL_CONTROL = {}
 
 
 async def _get_progress(chat_id):
     doc = await db.misc.find_one({"_id": f"backfill_{chat_id}"})
-    return doc or {"_id": f"backfill_{chat_id}", "last_message_id": 0, "scanned": 0, "saved": 0, "skipped": 0, "status": "not_started"}
+    return doc or {"_id": f"backfill_{chat_id}", "last_message_id": 0, "scanned": 0, "forwarded": 0, "skipped": 0, "status": "not_started"}
 
 
 async def _save_progress(chat_id, **fields):
@@ -50,57 +52,78 @@ async def _join_target(target: str):
 
 async def backfill_channel(chat_id, resume=True):
     """
-    Full-history scan of a channel, indexing every video/document found.
-    Progress (current message id, counts) is saved to the DB every 500 messages,
-    so if the process is interrupted it can RESUME from where it left off
-    instead of starting over.
+    Full-history scan of a channel. Every video/document found gets FORWARDED
+    (server-side copy, no download) into YOUR OWN backup channel
+    (USERBOT_BACKUP_CHANNEL). The bot's existing live-index watches that
+    backup channel and saves everything automatically — no direct DB writes here.
+    Progress is saved so this can be safely resumed if interrupted.
     """
-    progress = await _get_progress(chat_id) if resume else {"last_message_id": 0, "scanned": 0, "saved": 0, "skipped": 0}
+    if not USERBOT_BACKUP_CHANNEL:
+        raise RuntimeError("USERBOT_BACKUP_CHANNEL is not set on Render.")
+
+    progress = await _get_progress(chat_id) if resume else {"last_message_id": 0, "scanned": 0, "forwarded": 0, "skipped": 0}
     scanned = progress.get("scanned", 0)
-    saved_count = progress.get("saved", 0)
+    forwarded_count = progress.get("forwarded", 0)
     skipped_count = progress.get("skipped", 0)
     offset_id = progress.get("last_message_id", 0)
 
     await _save_progress(chat_id, status="running")
+    BACKFILL_CONTROL[chat_id] = "running"
     last_seen_id = offset_id
 
     async for message in userbot.get_chat_history(chat_id, offset_id=offset_id):
+        # Handle pause: wait here (without losing our place) until resumed or stopped
+        while BACKFILL_CONTROL.get(chat_id) == "paused":
+            await asyncio.sleep(2)
+
+        # Handle stop: save progress at current point and exit cleanly
+        if BACKFILL_CONTROL.get(chat_id) == "stop":
+            await _save_progress(
+                chat_id, last_message_id=last_seen_id, scanned=scanned,
+                forwarded=forwarded_count, skipped=skipped_count, status="stopped"
+            )
+            logger.info(f"[USERBOT-BACKFILL] Stopped by user at message_id={last_seen_id}.")
+            BACKFILL_CONTROL.pop(chat_id, None)
+            return scanned, forwarded_count, skipped_count
+
         last_seen_id = message.id
         scanned += 1
         media = message.video or message.document
         if media:
-            media.caption = message.caption
             try:
-                saved, _ = await save_file(media)
-                if saved:
-                    saved_count += 1
-                else:
-                    skipped_count += 1
+                await message.forward(USERBOT_BACKUP_CHANNEL)
+                forwarded_count += 1
+                await asyncio.sleep(1.2)  # gentle pacing to avoid flood limits
             except FloodWait as e:
+                logger.warning(f"[USERBOT-BACKFILL] FloodWait {e.value}s at message {message.id}")
                 await asyncio.sleep(e.value)
             except Exception as e:
-                logger.exception(f"[USERBOT-BACKFILL] Failed on '{getattr(media, 'file_name', '?')}'")
-        if scanned % 500 == 0:
+                skipped_count += 1
+                logger.exception(f"[USERBOT-BACKFILL] Failed to forward message {message.id}")
+        if scanned % 200 == 0:
             logger.info(
-                f"[USERBOT-BACKFILL] Now at message_id={last_seen_id} | scanned={scanned} saved={saved_count} skipped={skipped_count}"
+                f"[USERBOT-BACKFILL] Now at message_id={last_seen_id} | scanned={scanned} forwarded={forwarded_count} skipped={skipped_count}"
             )
             await _save_progress(
                 chat_id, last_message_id=last_seen_id, scanned=scanned,
-                saved=saved_count, skipped=skipped_count, status="running"
+                forwarded=forwarded_count, skipped=skipped_count, status="running"
             )
 
     await _save_progress(
         chat_id, last_message_id=last_seen_id, scanned=scanned,
-        saved=saved_count, skipped=skipped_count, status="done"
+        forwarded=forwarded_count, skipped=skipped_count, status="done"
     )
-    logger.info(f"[USERBOT-BACKFILL] DONE. Scanned {scanned}, saved {saved_count}, skipped {skipped_count}")
-    return scanned, saved_count, skipped_count
+    BACKFILL_CONTROL.pop(chat_id, None)
+    logger.info(f"[USERBOT-BACKFILL] DONE. Scanned {scanned}, forwarded {forwarded_count}, skipped {skipped_count}")
+    return scanned, forwarded_count, skipped_count
 
 
 async def start_userbot():
     if not userbot:
         logger.info("USER_SESSION not set — userbot indexer is disabled.")
         return
+    if not USERBOT_BACKUP_CHANNEL:
+        logger.warning("USERBOT_BACKUP_CHANNEL not set — userbot will join channels but can't forward files anywhere yet.")
 
     await userbot.start()
     me = await userbot.get_me()
@@ -113,15 +136,12 @@ async def start_userbot():
     async def _on_new_file(client, message):
         if message.chat.id not in INDEXED_CHAT_IDS:
             return  # ignore channels we weren't asked to index
-        media = message.video or message.document
-        if not media:
+        if not USERBOT_BACKUP_CHANNEL:
             return
-        media.caption = message.caption
         try:
-            saved, _ = await save_file(media)
-            if saved:
-                logger.info(f"[USERBOT-LIVE] Indexed new file: {media.file_name}")
+            await message.forward(USERBOT_BACKUP_CHANNEL)
+            logger.info(f"[USERBOT-LIVE] Forwarded new file: {getattr(message.video or message.document, 'file_name', '?')}")
         except Exception as e:
-            logger.error(f"[USERBOT-LIVE] Failed to index '{getattr(media, 'file_name', '?')}': {e}")
+            logger.error(f"[USERBOT-LIVE] Failed to forward message {message.id}: {e}")
 
-    logger.info(f"[USERBOT] Live indexing active for {len(INDEXED_CHAT_IDS)} channel(s).")
+    logger.info(f"[USERBOT] Live indexing active for {len(INDEXED_CHAT_IDS)} channel(s), forwarding into {USERBOT_BACKUP_CHANNEL}.")
