@@ -1416,12 +1416,60 @@ async def reset_trial(client, message):
         await message.reply_text(f"An error occurred: {e}")
 
 
+@Client.on_message(filters.command('userbot_pause') & filters.user(ADMINS))
+async def userbot_pause_cmd(client, message):
+    from userbot_index import BACKFILL_CONTROL
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: <code>/userbot_pause -1001234567890</code>")
+    try:
+        chat_id = int(message.command[1])
+    except ValueError:
+        chat_id = message.command[1]
+    if chat_id not in BACKFILL_CONTROL:
+        return await message.reply_text("⚠️ No backfill is currently running for that channel.")
+    BACKFILL_CONTROL[chat_id] = "paused"
+    await message.reply_text("⏸️ Paused. It's holding its current position — resume anytime with /userbot_resume.")
+
+
+@Client.on_message(filters.command('userbot_resume') & filters.user(ADMINS))
+async def userbot_resume_cmd(client, message):
+    from userbot_index import BACKFILL_CONTROL
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: <code>/userbot_resume -1001234567890</code>")
+    try:
+        chat_id = int(message.command[1])
+    except ValueError:
+        chat_id = message.command[1]
+    if chat_id not in BACKFILL_CONTROL:
+        return await message.reply_text("⚠️ That backfill isn't paused right now (it may have stopped — use /userbot_backfill to restart it, it'll resume from where it left off).")
+    BACKFILL_CONTROL[chat_id] = "running"
+    await message.reply_text("▶️ Resumed.")
+
+
+@Client.on_message(filters.command('userbot_stop') & filters.user(ADMINS))
+async def userbot_stop_cmd(client, message):
+    from userbot_index import BACKFILL_CONTROL
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: <code>/userbot_stop -1001234567890</code>")
+    try:
+        chat_id = int(message.command[1])
+    except ValueError:
+        chat_id = message.command[1]
+    if chat_id not in BACKFILL_CONTROL:
+        return await message.reply_text("⚠️ No backfill is currently running for that channel.")
+    BACKFILL_CONTROL[chat_id] = "stop"
+    await message.reply_text(
+        "🛑 Stopping... progress up to this point is saved. "
+        "Run /userbot_backfill again anytime to continue from here — it won't restart from scratch."
+    )
+
+
 @Client.on_message(filters.command('userbot_backfill') & filters.user(ADMINS))
 async def userbot_backfill_cmd(client, message):
     from userbot_index import userbot, backfill_channel, INDEXED_CHAT_IDS
     if not userbot or not userbot.is_connected:
         return await message.reply_text(
-            "❌ Userbot is not running. Set USER_SESSION and USERBOT_CHANNELS on Render first, then redeploy."
+            "❌ Userbot is not running. Set USER_SESSION, USERBOT_CHANNELS and USERBOT_BACKUP_CHANNEL on Render first, then redeploy."
         )
     if len(message.command) < 2:
         return await message.reply_text(
@@ -1435,16 +1483,20 @@ async def userbot_backfill_cmd(client, message):
         chat_id = message.command[1]
 
     status = await message.reply_text(
-        "⏳ Starting/resuming full-history backfill... this can take a long time for large channels.\n\n"
-        "It's SAFE to restart the bot anytime — it will pick up from where it left off, not from scratch.\n"
-        f"Check progress anytime with:\n<code>/userbot_status {chat_id}</code>"
+        "⏳ Starting/resuming full-history backfill... files are being FORWARDED to your backup channel, "
+        "then auto-indexed from there. This can take a long time for large channels.\n\n"
+        "It's SAFE to restart the bot anytime — it will pick up from where it left off, not from scratch.\n\n"
+        f"⏸️ Pause: <code>/userbot_pause {chat_id}</code>\n"
+        f"▶️ Resume: <code>/userbot_resume {chat_id}</code>\n"
+        f"🛑 Stop: <code>/userbot_stop {chat_id}</code>\n"
+        f"📊 Status: <code>/userbot_status {chat_id}</code>"
     )
 
     async def _run():
         try:
-            scanned, saved, skipped = await backfill_channel(chat_id)
+            scanned, forwarded, skipped = await backfill_channel(chat_id)
             await status.edit_text(
-                f"✅ Backfill complete!\n\nScanned: <code>{scanned}</code>\nNewly saved: <code>{saved}</code>\nAlready existed/skipped: <code>{skipped}</code>"
+                f"✅ Backfill complete!\n\nScanned: <code>{scanned}</code>\nForwarded to backup channel: <code>{forwarded}</code>\nFailed: <code>{skipped}</code>"
             )
         except Exception as e:
             await status.edit_text(f"❌ Backfill failed: {e}\n\nDon't worry, progress is saved — just run /userbot_backfill {chat_id} again to resume.")
@@ -1467,6 +1519,6 @@ async def userbot_status_cmd(client, message):
         f"Status: <code>{p.get('status', 'not_started')}</code>\n"
         f"Currently at message id: <code>{p.get('last_message_id', 0)}</code>\n"
         f"Scanned: <code>{p.get('scanned', 0)}</code>\n"
-        f"Saved: <code>{p.get('saved', 0)}</code>\n"
-        f"Skipped (duplicates): <code>{p.get('skipped', 0)}</code>"
+        f"Forwarded to backup channel: <code>{p.get('forwarded', 0)}</code>\n"
+        f"Failed: <code>{p.get('skipped', 0)}</code>"
     )
