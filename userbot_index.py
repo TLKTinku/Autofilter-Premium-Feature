@@ -79,7 +79,7 @@ async def backfill_channel(chat_id, resume=True):
             except FloodWait as e:
                 await asyncio.sleep(e.value)
             except Exception as e:
-                logger.error(f"[USERBOT-BACKFILL] Failed on '{getattr(media, 'file_name', '?')}': {e}")
+                logger.exception(f"[USERBOT-BACKFILL] Failed on '{getattr(media, 'file_name', '?')}'")
         if scanned % 500 == 0:
             logger.info(
                 f"[USERBOT-BACKFILL] Now at message_id={last_seen_id} | scanned={scanned} saved={saved_count} skipped={skipped_count}"
