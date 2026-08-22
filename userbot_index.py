@@ -37,7 +37,7 @@ def _clean_caption(text):
 
 def _clean_name(file_name):
     """Same normalization the bot's own save_file() uses, so name comparisons match exactly."""
-    file_name = re.sub(r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\]", " ", str(file_name))
+    file_name = re.sub(r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\]☞✧･ﾟ:", " ", str(file_name))
     return re.sub(r"\s+", " ", file_name).strip()
 
 
@@ -127,7 +127,7 @@ async def _backfill_pass(chat_id, progress):
                     if forwarded_count % 30 == 0:
                         await asyncio.sleep(4)
                     else:
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(0.7)
                 except FloodWait as e:
                     logger.warning(f"[USERBOT-BACKFILL] FloodWait {e.value}s at message {message.id}")
                     await asyncio.sleep(e.value)
