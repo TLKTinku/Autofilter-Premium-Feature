@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import re
+from collections import deque
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, UserAlreadyParticipant, InviteHashExpired
 
@@ -21,6 +22,42 @@ INDEXED_CHAT_IDS = set()
 
 # Control flags for active backfills: chat_id -> "running" | "paused" | "stop"
 BACKFILL_CONTROL = {}
+
+# Telegram flood/rate-limit protection.  A single queue is shared by live
+# indexing and backfill so multiple copy requests cannot hit the account at once.
+COPY_LOCK = asyncio.Lock()
+LAST_COPY_AT = 0.0
+MIN_COPY_INTERVAL = 2.0  # conservative spacing between copy requests
+MAX_COPY_RETRIES = 6
+
+async def _safe_copy(message, caption=None, label="copy"):
+    """Copy a message with serialization, FloodWait handling and bounded retries.
+
+    This does NOT bypass Telegram limits. It deliberately slows the account when
+    Telegram asks us to wait, which prevents one FloodWait from killing live indexing.
+    """
+    global LAST_COPY_AT
+    delay = 3.0
+    for attempt in range(1, MAX_COPY_RETRIES + 1):
+        try:
+            async with COPY_LOCK:
+                now = asyncio.get_running_loop().time()
+                wait = MIN_COPY_INTERVAL - (now - LAST_COPY_AT)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                result = await message.copy(USERBOT_BACKUP_CHANNEL, caption=caption)
+                LAST_COPY_AT = asyncio.get_running_loop().time()
+                return result
+        except FloodWait as e:
+            wait_for = max(int(getattr(e, "value", 1)), 1)
+            logger.warning(f"[USERBOT-{label}] FloodWait: Telegram asked us to wait {wait_for}s (attempt {attempt}/{MAX_COPY_RETRIES})")
+            await asyncio.sleep(wait_for + 1)
+        except Exception as e:
+            if attempt >= MAX_COPY_RETRIES:
+                raise
+            logger.warning(f"[USERBOT-{label}] Copy failed (attempt {attempt}/{MAX_COPY_RETRIES}): {e}; retrying in {delay:.1f}s")
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60.0)
 
 
 def _clean_caption(text):
@@ -122,15 +159,8 @@ async def _backfill_pass(chat_id, progress):
                 dup_count += 1
             else:
                 try:
-                    await message.copy(USERBOT_BACKUP_CHANNEL, caption=_clean_caption(message.caption))
+                    await _safe_copy(message, caption=_clean_caption(message.caption), label="BACKFILL")
                     forwarded_count += 1
-                    if forwarded_count % 30 == 0:
-                        await asyncio.sleep(4)
-                    else:
-                        await asyncio.sleep(0.7)
-                except FloodWait as e:
-                    logger.warning(f"[USERBOT-BACKFILL] FloodWait {e.value}s at message {message.id}")
-                    await asyncio.sleep(e.value)
                 except Exception:
                     skipped_count += 1
                     logger.exception(f"[USERBOT-BACKFILL] Failed to forward message {message.id}")
@@ -227,9 +257,9 @@ async def start_userbot():
             logger.info(f"[USERBOT-LIVE] Skipped exact duplicate: {media.file_name}")
             return
         try:
-            await message.copy(USERBOT_BACKUP_CHANNEL, caption=_clean_caption(message.caption))
+            await _safe_copy(message, caption=_clean_caption(message.caption), label="LIVE")
             logger.info(f"[USERBOT-LIVE] Copied new file: {getattr(media, 'file_name', '?')}")
         except Exception as e:
-            logger.error(f"[USERBOT-LIVE] Failed to forward message {message.id}: {e}")
+            logger.error(f"[USERBOT-LIVE] Failed after retries for message {message.id}: {e}")
 
     logger.info(f"[USERBOT] Live indexing active for {len(INDEXED_CHAT_IDS)} channel(s), forwarding into {USERBOT_BACKUP_CHANNEL}.")
