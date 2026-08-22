@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import re
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, UserAlreadyParticipant, InviteHashExpired
@@ -123,7 +124,10 @@ async def _backfill_pass(chat_id, progress):
                 try:
                     await message.copy(USERBOT_BACKUP_CHANNEL, caption=_clean_caption(message.caption))
                     forwarded_count += 1
-                    await asyncio.sleep(0.7)
+                    if forwarded_count % 10 == 0:
+                        await asyncio.sleep(3)
+                    else:
+                        await asyncio.sleep(0.5)
                 except FloodWait as e:
                     logger.warning(f"[USERBOT-BACKFILL] FloodWait {e.value}s at message {message.id}")
                     await asyncio.sleep(e.value)
@@ -197,6 +201,20 @@ async def start_userbot():
 
     for target in USERBOT_CHANNELS:
         await _join_target(target)
+
+    # Auto-resume any backfill that was still 'running' when the process last stopped
+    # (e.g. due to a Render redeploy/restart) — no manual command needed.
+    try:
+        async for doc in db.misc.find({"status": "running", "_id": {"$regex": "^backfill_"}}):
+            chat_id_str = doc["_id"].replace("backfill_", "")
+            try:
+                chat_id = int(chat_id_str)
+            except ValueError:
+                chat_id = chat_id_str
+            logger.info(f"[USERBOT] Auto-resuming interrupted backfill for {chat_id}")
+            asyncio.create_task(backfill_channel(chat_id, resume=True))
+    except Exception as e:
+        logger.error(f"[USERBOT] Failed to check for interrupted backfills: {e}")
 
     @userbot.on_message(filters.channel & (filters.video | filters.document))
     async def _on_new_file(client, message):
