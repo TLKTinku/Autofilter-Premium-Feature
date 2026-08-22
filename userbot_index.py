@@ -124,10 +124,10 @@ async def _backfill_pass(chat_id, progress):
                 try:
                     await message.copy(USERBOT_BACKUP_CHANNEL, caption=_clean_caption(message.caption))
                     forwarded_count += 1
-                    if forwarded_count % 10 == 0:
-                        await asyncio.sleep(3)
+                    if forwarded_count % 20 == 0:
+                        await asyncio.sleep(4)
                     else:
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(0.3)
                 except FloodWait as e:
                     logger.warning(f"[USERBOT-BACKFILL] FloodWait {e.value}s at message {message.id}")
                     await asyncio.sleep(e.value)
