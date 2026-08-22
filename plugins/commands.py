@@ -1520,5 +1520,6 @@ async def userbot_status_cmd(client, message):
         f"Currently at message id: <code>{p.get('last_message_id', 0)}</code>\n"
         f"Scanned: <code>{p.get('scanned', 0)}</code>\n"
         f"Forwarded to backup channel: <code>{p.get('forwarded', 0)}</code>\n"
+        f"Duplicates skipped (same name+size): <code>{p.get('duplicates', 0)}</code>\n"
         f"Failed: <code>{p.get('skipped', 0)}</code>"
     )
