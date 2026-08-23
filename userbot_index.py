@@ -84,13 +84,48 @@ def _is_short_video(media, min_duration=240):
     return duration is not None and duration < min_duration
 
 
+_seen_collection = db.db.userbot_seen_files
+_seen_index_ready = False
+
+
+async def _ensure_seen_index():
+    global _seen_index_ready
+    if not _seen_index_ready:
+        try:
+            await _seen_collection.create_index(
+                [("file_name", 1), ("file_size", 1)], unique=True
+            )
+        except Exception as e:
+            logger.error(f"[USERBOT] Could not create unique index on userbot_seen_files: {e}")
+        _seen_index_ready = True
+
+
 async def _already_have_exact_copy(file_name, file_size):
     """
-    TRUE duplicate check: same cleaned name AND same exact file size.
-    Different sizes (different quality/print of the same title) are NOT duplicates
-    and are allowed through.
+    TRUE, INSTANT duplicate check: same cleaned name AND same exact file size.
+    This does NOT rely on the bot's own MongoDB save (which happens later,
+    asynchronously, after the file lands in the backup channel and the bot's
+    separate live-index picks it up — that has lag, and checking against it
+    directly caused a race condition where several duplicates got forwarded
+    before the first one was even saved).
+
+    Instead, we atomically CLAIM the (name, size) pair ourselves the moment
+    we decide to forward it, using a unique index. If the claim succeeds,
+    we've never seen it before (from us OR pre-existing in the main DB) —
+    proceed. If it fails (duplicate key), someone already claimed it — skip.
     """
+    await _ensure_seen_index()
     name = _clean_name(file_name)
+
+    # First, an atomic claim against OUR OWN tracker — instant, no race condition.
+    try:
+        await _seen_collection.insert_one({"file_name": name, "file_size": file_size})
+    except Exception:
+        # DuplicateKeyError (or any insert failure) means we've already claimed/seen this one.
+        return True
+
+    # Also check the bot's real database, for files that already existed there
+    # BEFORE this userbot session started (not something we forwarded ourselves).
     query = {"file_name": name, "file_size": file_size}
     try:
         if await Media.count_documents(query, limit=1):
@@ -98,7 +133,8 @@ async def _already_have_exact_copy(file_name, file_size):
         if MULTIPLE_DB and await Media2.count_documents(query, limit=1):
             return True
     except Exception as e:
-        logger.error(f"[USERBOT] Duplicate-check failed, allowing through: {e}")
+        logger.error(f"[USERBOT] Duplicate-check against main DB failed (continuing anyway): {e}")
+
     return False
 
 
