@@ -78,6 +78,12 @@ def _clean_name(file_name):
     return re.sub(r"\s+", " ", file_name).strip()
 
 
+def _is_short_video(media, min_duration=240):
+    """Return True when media duration is known and is shorter than 4 minutes."""
+    duration = getattr(media, "duration", None)
+    return duration is not None and duration < min_duration
+
+
 async def _already_have_exact_copy(file_name, file_size):
     """
     TRUE duplicate check: same cleaned name AND same exact file size.
@@ -154,6 +160,19 @@ async def _backfill_pass(chat_id, progress):
         media = message.video or message.document
 
         if media:
+            if _is_short_video(media):
+                skipped_count += 1
+                logger.info(
+                    f"[USERBOT-BACKFILL] Skipped short video (<4 min): "
+                    f"{getattr(media, 'file_name', '?')} | duration={getattr(media, 'duration', '?')}s"
+                )
+                await _save_progress(
+                    chat_id, last_message_id=last_seen_id, scanned=scanned,
+                    forwarded=forwarded_count, skipped=skipped_count,
+                    duplicates=dup_count, status="running"
+                )
+                continue
+
             is_dup = await _already_have_exact_copy(media.file_name, media.file_size)
             if is_dup:
                 dup_count += 1
@@ -253,6 +272,12 @@ async def start_userbot():
         if not USERBOT_BACKUP_CHANNEL:
             return
         media = message.video or message.document
+        if _is_short_video(media):
+            logger.info(
+                f"[USERBOT-LIVE] Skipped short video (<4 min): "
+                f"{getattr(media, 'file_name', '?')} | duration={getattr(media, 'duration', '?')}s"
+            )
+            return
         if await _already_have_exact_copy(media.file_name, media.file_size):
             logger.info(f"[USERBOT-LIVE] Skipped exact duplicate: {media.file_name}")
             return
