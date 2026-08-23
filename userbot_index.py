@@ -27,7 +27,7 @@ BACKFILL_CONTROL = {}
 # indexing and backfill so multiple copy requests cannot hit the account at once.
 COPY_LOCK = asyncio.Lock()
 LAST_COPY_AT = 0.0
-MIN_COPY_INTERVAL = 2.0  # conservative spacing between copy requests
+MIN_COPY_INTERVAL = 1.5  # conservative spacing between copy requests
 MAX_COPY_RETRIES = 6
 
 async def _safe_copy(message, caption=None, label="copy"):
@@ -74,7 +74,7 @@ def _clean_caption(text):
 
 def _clean_name(file_name):
     """Same normalization the bot's own save_file() uses, so name comparisons match exactly."""
-    file_name = re.sub(r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\]☞✧･ﾟ:", " ", str(file_name))
+    file_name = re.sub(r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\]", " ", str(file_name))
     return re.sub(r"\s+", " ", file_name).strip()
 
 
