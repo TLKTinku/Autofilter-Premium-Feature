@@ -1523,3 +1523,44 @@ async def userbot_status_cmd(client, message):
         f"Duplicates skipped (same name+size): <code>{p.get('duplicates', 0)}</code>\n"
         f"Failed: <code>{p.get('skipped', 0)}</code>"
     )
+
+
+@Client.on_message(filters.command('cleanup_duplicates') & filters.user(ADMINS))
+async def cleanup_duplicates_cmd(client, message):
+    status = await message.reply_text("⏳ Scanning for duplicate entries (same name + same size)... this can take a few minutes for large databases.")
+
+    async def _run():
+        total_removed = 0
+        total_groups = 0
+        try:
+            for coll, label in [(Media.collection, "Primary DB"), (Media2.collection if MULTIPLE_DB else None, "Secondary DB")]:
+                if coll is None:
+                    continue
+                pipeline = [
+                    {"$group": {
+                        "_id": {"file_name": "$file_name", "file_size": "$file_size"},
+                        "ids": {"$push": "$_id"},
+                        "count": {"$sum": 1}
+                    }},
+                    {"$match": {"count": {"$gt": 1}}}
+                ]
+                async for group in coll.aggregate(pipeline, allowDiskUse=True):
+                    ids = group["ids"]
+                    ids_to_delete = ids[1:]  # keep the first, delete the rest
+                    if ids_to_delete:
+                        result = await coll.delete_many({"_id": {"$in": ids_to_delete}})
+                        total_removed += result.deleted_count
+                    total_groups += 1
+                logger.info(f"[CLEANUP] {label}: processed duplicate groups so far, total_removed={total_removed}")
+
+            await status.edit_text(
+                f"✅ <b>Cleanup complete!</b>\n\n"
+                f"Duplicate groups found: <code>{total_groups}</code>\n"
+                f"Extra copies removed: <code>{total_removed}</code>\n\n"
+                f"One copy of each file was kept — nothing unique was deleted."
+            )
+        except Exception as e:
+            logger.exception("[CLEANUP] Failed")
+            await status.edit_text(f"❌ Cleanup failed: {e}")
+
+    client.loop.create_task(_run())
