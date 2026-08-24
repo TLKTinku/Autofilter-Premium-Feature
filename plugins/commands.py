@@ -1528,8 +1528,11 @@ async def userbot_status_cmd(client, message):
 @Client.on_message(filters.command('cleanup_duplicates') & filters.user(ADMINS))
 async def cleanup_channel_duplicates_cmd(client, message):
     from info import USERBOT_BACKUP_CHANNEL
+    from userbot_index import userbot
     if not USERBOT_BACKUP_CHANNEL:
         return await message.reply_text("❌ USERBOT_BACKUP_CHANNEL is not set.")
+    if not userbot or not userbot.is_connected:
+        return await message.reply_text("❌ Userbot is not connected — it's needed to scan channel history (bots can't do this themselves).")
 
     status = await message.reply_text(
         "⏳ Scanning your backup channel directly (this is the source of truth) for duplicate "
@@ -1542,7 +1545,7 @@ async def cleanup_channel_duplicates_cmd(client, message):
         deleted_db = 0
         scanned = 0
         try:
-            async for msg in client.get_chat_history(USERBOT_BACKUP_CHANNEL):
+            async for msg in userbot.get_chat_history(USERBOT_BACKUP_CHANNEL):
                 scanned += 1
                 media = msg.video or msg.document
                 if not media:
@@ -1554,7 +1557,7 @@ async def cleanup_channel_duplicates_cmd(client, message):
                 if key in seen:
                     # duplicate — delete this message AND its DB entry
                     try:
-                        await client.delete_messages(USERBOT_BACKUP_CHANNEL, msg.id)
+                        await userbot.delete_messages(USERBOT_BACKUP_CHANNEL, msg.id)
                         deleted_msgs += 1
                     except Exception as e:
                         logger.error(f"[CLEANUP] Could not delete message {msg.id}: {e}")
