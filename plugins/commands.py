@@ -1526,41 +1526,63 @@ async def userbot_status_cmd(client, message):
 
 
 @Client.on_message(filters.command('cleanup_duplicates') & filters.user(ADMINS))
-async def cleanup_duplicates_cmd(client, message):
-    status = await message.reply_text("⏳ Scanning for duplicate entries (same name + same size)... this can take a few minutes for large databases.")
+async def cleanup_channel_duplicates_cmd(client, message):
+    from info import USERBOT_BACKUP_CHANNEL
+    if not USERBOT_BACKUP_CHANNEL:
+        return await message.reply_text("❌ USERBOT_BACKUP_CHANNEL is not set.")
+
+    status = await message.reply_text(
+        "⏳ Scanning your backup channel directly (this is the source of truth) for duplicate "
+        "files (same name + same size)... this can take a while for large channels."
+    )
 
     async def _run():
-        total_removed = 0
-        total_groups = 0
+        seen = {}  # (clean_name, size) -> first message_id kept
+        deleted_msgs = 0
+        deleted_db = 0
+        scanned = 0
         try:
-            for coll, label in [(Media.collection, "Primary DB"), (Media2.collection if MULTIPLE_DB else None, "Secondary DB")]:
-                if coll is None:
+            async for msg in client.get_chat_history(USERBOT_BACKUP_CHANNEL):
+                scanned += 1
+                media = msg.video or msg.document
+                if not media:
                     continue
-                pipeline = [
-                    {"$group": {
-                        "_id": {"file_name": "$file_name", "file_size": "$file_size"},
-                        "ids": {"$push": "$_id"},
-                        "count": {"$sum": 1}
-                    }},
-                    {"$match": {"count": {"$gt": 1}}}
-                ]
-                async for group in coll.aggregate(pipeline, allowDiskUse=True):
-                    ids = group["ids"]
-                    ids_to_delete = ids[1:]  # keep the first, delete the rest
-                    if ids_to_delete:
-                        result = await coll.delete_many({"_id": {"$in": ids_to_delete}})
-                        total_removed += result.deleted_count
-                    total_groups += 1
-                logger.info(f"[CLEANUP] {label}: processed duplicate groups so far, total_removed={total_removed}")
+                clean_name = re.sub(r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\]", " ", str(media.file_name or ""))
+                clean_name = re.sub(r"\s+", " ", clean_name).strip().lower()
+                key = (clean_name, media.file_size)
+
+                if key in seen:
+                    # duplicate — delete this message AND its DB entry
+                    try:
+                        await client.delete_messages(USERBOT_BACKUP_CHANNEL, msg.id)
+                        deleted_msgs += 1
+                    except Exception as e:
+                        logger.error(f"[CLEANUP] Could not delete message {msg.id}: {e}")
+                    try:
+                        res = await Media.collection.delete_one({"_id": media.file_id})
+                        if res.deleted_count:
+                            deleted_db += 1
+                        elif MULTIPLE_DB:
+                            res2 = await Media2.collection.delete_one({"_id": media.file_id})
+                            if res2.deleted_count:
+                                deleted_db += 1
+                    except Exception as e:
+                        logger.error(f"[CLEANUP] Could not delete DB entry for {media.file_id}: {e}")
+                else:
+                    seen[key] = msg.id
+
+                if scanned % 500 == 0:
+                    logger.info(f"[CLEANUP] scanned={scanned} deleted_msgs={deleted_msgs} deleted_db={deleted_db}")
 
             await status.edit_text(
-                f"✅ <b>Cleanup complete!</b>\n\n"
-                f"Duplicate groups found: <code>{total_groups}</code>\n"
-                f"Extra copies removed: <code>{total_removed}</code>\n\n"
-                f"One copy of each file was kept — nothing unique was deleted."
+                f"✅ <b>Channel cleanup complete!</b>\n\n"
+                f"Messages scanned: <code>{scanned}</code>\n"
+                f"Duplicate messages deleted from channel: <code>{deleted_msgs}</code>\n"
+                f"Matching DB entries removed: <code>{deleted_db}</code>\n\n"
+                f"One copy of each file was kept."
             )
         except Exception as e:
-            logger.exception("[CLEANUP] Failed")
+            logger.exception("[CLEANUP] Channel cleanup failed")
             await status.edit_text(f"❌ Cleanup failed: {e}")
 
     client.loop.create_task(_run())
