@@ -924,7 +924,7 @@ async def request_owner_custom_cb(client, query: CallbackQuery):
     await query.answer("Now type your reply message in this chat — it will be sent to the user.", show_alert=True)
 
 
-@Client.on_message(filters.text & filters.create(lambda _, __, m: m.from_user and m.from_user.id in ADMIN_AWAITING_REPLY))
+@Client.on_message(filters.text & filters.create(lambda _, __, m: m.from_user and m.from_user.id in ADMIN_AWAITING_REPLY), group=-1)
 async def owner_custom_reply_handler(client, message):
     admin_id = message.from_user.id
     req_key = ADMIN_AWAITING_REPLY.pop(admin_id, None)
