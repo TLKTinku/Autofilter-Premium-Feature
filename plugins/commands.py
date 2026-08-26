@@ -1273,7 +1273,8 @@ async def reset_group_callback(client, callback_query):
         'caption': CUSTOM_FILE_CAPTION,
         'log': LOG_CHANNEL,
         'is_verify': IS_VERIFY,
-        'fsub': AUTH_CHANNELS
+        'fsub': AUTH_CHANNELS,
+        'imdb': IMDB,
     }
     current = await get_settings(grp_id)
     if current == defaults:
@@ -1386,6 +1387,7 @@ async def set_fsub(client, message):
 async def reset_all_settings(client, message):
     try:
         reset_count = await db.dreamx_reset_settings()
+        temp.SETTINGS.clear()  # also clear the in-memory cache — otherwise the running bot keeps using old cached settings until a restart
         await message.reply_text(
             f"<b>ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ ꜱᴇᴛᴛɪɴɢꜱ ꜰᴏʀ  <code>{reset_count}</code> ɢʀᴏᴜᴘꜱ. ᴅᴇꜰᴀᴜʟᴛ ᴠᴀʟᴜᴇꜱ ᴡɪʟʟ ʙᴇ ᴜꜱᴇᴅ ✅</b>",
             quote=True
