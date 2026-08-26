@@ -940,6 +940,10 @@ async def get_cap(settings, remaining_seconds, files, query, total_results, sear
                     imdb = None
                 if imdb:
                     TEMPLATE = script.IMDB_TEMPLATE_TXT
+                    combined_text = " ".join(
+                        f"{f.file_name} {getattr(f, 'caption', '') or ''}" for f in files
+                    )
+                    detected_language = extract_language(combined_text)
                     cap = TEMPLATE.format(
                         query=search, 
                         title=imdb['title'],
@@ -954,7 +958,7 @@ async def get_cap(settings, remaining_seconds, files, query, total_results, sear
                         runtime=imdb["runtime"],
                         countries=imdb["countries"],
                         certificates=imdb["certificates"],
-                        languages=imdb["languages"],
+                        languages=detected_language if detected_language != "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ" else imdb["languages"],
                         director=imdb["director"],
                         writer=imdb["writer"],
                         producer=imdb["producer"],
@@ -969,6 +973,7 @@ async def get_cap(settings, remaining_seconds, files, query, total_results, sear
                         plot=imdb['plot'],
                         rating=imdb['rating'],
                         url=imdb['url'],
+                        grp_lnk=BACKUP_CHANNEL_LINK,
                         **locals()
                     )
                     
