@@ -1576,6 +1576,15 @@ async def cleanup_channel_duplicates_cmd(client, message):
 
                 if scanned % 500 == 0:
                     logger.info(f"[CLEANUP] scanned={scanned} deleted_msgs={deleted_msgs} deleted_db={deleted_db}")
+                    try:
+                        await status.edit_text(
+                            f"⏳ <b>Cleanup in progress...</b>\n\n"
+                            f"Scanned so far: <code>{scanned}</code>\n"
+                            f"Duplicates deleted so far: <code>{deleted_msgs}</code>\n\n"
+                            f"(This message updates every 500 scanned files)"
+                        )
+                    except Exception:
+                        pass  # ignore if Telegram rejects an identical-content edit
 
             await status.edit_text(
                 f"✅ <b>Channel cleanup complete!</b>\n\n"

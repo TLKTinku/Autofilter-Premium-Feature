@@ -37,6 +37,7 @@ BUTTONS1 = {}
 BUTTONS2 = {}
 SPELL_CHECK = {}
 OWNER_REQ_CACHE = {}
+ADMIN_AWAITING_REPLY = {}  # admin_user_id -> req_key, while they're typing a custom reply
 
 
 @Client.on_message(filters.group & filters.text & filters.incoming)
@@ -855,14 +856,24 @@ async def request_owner_cb(client, query: CallbackQuery):
         return await query.answer("Request system is not configured. Contact admin.", show_alert=True)
 
     try:
-        await client.send_message(
+        sent = await client.send_message(
             chat_id=OWNER_CHAT_GROUP,
             text=(
                 f"<b>📝 Movie/Series Request</b>\n\n"
                 f"🎬 Query : <code>{content}</code>\n"
                 f"👤 Requested by : {mention}\n"
                 f"🆔 User id : <code>{reporter}</code>"
-            )
+            ),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Added, Search Again", callback_data=f"reqowner_added#{req_key}"),
+                InlineKeyboardButton("💬 Other Message", callback_data=f"reqowner_custom#{req_key}"),
+            ]])
+        )
+        # Persist so admin can reply anytime later, even after a restart
+        await db.misc.update_one(
+            {"_id": f"ownerreq_{req_key}"},
+            {"$set": {"user_id": int(reporter), "query": content, "mention": mention}},
+            upsert=True
         )
     except Exception as e:
         logger.exception("Failed to forward owner request: %s", e)
@@ -874,6 +885,63 @@ async def request_owner_cb(client, query: CallbackQuery):
     except Exception:
         pass
     await query.answer("Request sent to the owner!", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^reqowner_added#"))
+async def request_owner_added_cb(client, query: CallbackQuery):
+    if query.from_user.id not in ADMINS:
+        return await query.answer("Only admins can respond to requests.", show_alert=True)
+    req_key = query.data.split("#", 1)[1]
+    doc = await db.misc.find_one({"_id": f"ownerreq_{req_key}"})
+    if not doc:
+        return await query.answer("This request record was not found (maybe already handled).", show_alert=True)
+    try:
+        await client.send_message(
+            chat_id=doc["user_id"],
+            text=f"✅ <b>Your requested movie/series has been added!</b>\n\n🎬 <code>{doc.get('query', '')}</code>\n\nPlease search for it again 🙂"
+        )
+    except Exception as e:
+        return await query.answer(f"Could not message the user: {e}", show_alert=True)
+    try:
+        await query.message.edit_reply_markup(InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Marked Added — user notified", callback_data="noop")
+        ]]))
+    except Exception:
+        pass
+    await db.misc.delete_one({"_id": f"ownerreq_{req_key}"})
+    await query.answer("✅ User notified that it's added!", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^reqowner_custom#"))
+async def request_owner_custom_cb(client, query: CallbackQuery):
+    if query.from_user.id not in ADMINS:
+        return await query.answer("Only admins can respond to requests.", show_alert=True)
+    req_key = query.data.split("#", 1)[1]
+    doc = await db.misc.find_one({"_id": f"ownerreq_{req_key}"})
+    if not doc:
+        return await query.answer("This request record was not found (maybe already handled).", show_alert=True)
+    ADMIN_AWAITING_REPLY[query.from_user.id] = req_key
+    await query.answer("Now type your reply message in this chat — it will be sent to the user.", show_alert=True)
+
+
+@Client.on_message(filters.text & filters.create(lambda _, __, m: m.from_user and m.from_user.id in ADMIN_AWAITING_REPLY))
+async def owner_custom_reply_handler(client, message):
+    admin_id = message.from_user.id
+    req_key = ADMIN_AWAITING_REPLY.pop(admin_id, None)
+    if not req_key:
+        return
+    doc = await db.misc.find_one({"_id": f"ownerreq_{req_key}"})
+    if not doc:
+        return await message.reply_text("⚠️ This request record was not found (maybe expired).")
+    try:
+        await client.send_message(
+            chat_id=doc["user_id"],
+            text=f"📩 <b>Message from the owner regarding your request</b> (<code>{doc.get('query', '')}</code>):\n\n{message.text}"
+        )
+        await message.reply_text("✅ Your message has been sent to the user.")
+    except Exception as e:
+        await message.reply_text(f"❌ Could not message the user: {e}")
+    await db.misc.delete_one({"_id": f"ownerreq_{req_key}"})
 
 
 @Client.on_callback_query()
