@@ -156,6 +156,23 @@ async def get_movie_detailsx(query, id=False, file=None):
                     if year_match:
                         year = year_match[0]
 
+                # Prefer the ACTUAL matched file's title over the raw (often generic)
+                # search query — this fixes cases like searching "Harry Potter" but the
+                # file that actually matched being the 2nd/3rd movie, not the 1st.
+                if file:
+                    file_title = re.sub(r'\.\w{2,4}$', '', str(file))  # drop extension
+                    file_title = re.sub(r'[_\.\-]+', ' ', file_title)
+                    # Cut off at the first year or common quality/source tag — title comes before that
+                    cutoff = re.search(
+                        r'\b(19\d{2}|20\d{2}|1080p|720p|480p|2160p|4k|hdrip|webrip|web-?dl|bluray|brrip|hdtv|hdcam|camrip|dual audio|multi audio|s\d{1,2}(e\d{1,3})?)\b',
+                        file_title, re.IGNORECASE
+                    )
+                    if cutoff and cutoff.start() > 2:
+                        file_title = file_title[:cutoff.start()]
+                    file_title = re.sub(r'\s+', ' ', file_title).strip(" -")
+                    if len(file_title) >= 3:
+                        q = file_title
+
                 search_params = {"api_key": TMDB_API_KEY, "query": q, "include_adult": "false"}
                 async with session.get(f"{tmdb_base}/search/multi", params=search_params) as resp:
                     if resp.status != 200:
