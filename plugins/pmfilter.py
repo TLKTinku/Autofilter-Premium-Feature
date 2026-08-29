@@ -1,4 +1,4 @@
-from utils import get_size, is_subscribed, is_req_subscribed, group_setting_buttons, get_poster, get_posterx, temp, get_settings, save_group_settings, get_cap, imdb, is_check_admin, extract_request_content, log_error, clean_filename, generate_season_variations, clean_search_text, format_file_caption
+from utils import get_size, is_subscribed, is_req_subscribed, group_setting_buttons, get_poster, get_posterx, temp, get_settings, save_group_settings, get_cap, imdb, is_check_admin, extract_request_content, log_error, clean_filename, generate_season_variations, clean_search_text, format_file_caption, extract_language
 import tracemalloc
 from fuzzywuzzy import process
 from dreamxbotz.util.file_properties import get_name, get_hash
@@ -2034,6 +2034,10 @@ async def auto_filter(client, msg, spoll=False):
             TEMPLATE = settings['template']
 
         if imdb:
+            combined_text = " ".join(
+                f"{f.file_name} {getattr(f, 'caption', '') or ''}" for f in files
+            )
+            detected_language = extract_language(combined_text)
             cap = TEMPLATE.format(
                 query=search,
                 title=imdb['title'],
@@ -2048,7 +2052,7 @@ async def auto_filter(client, msg, spoll=False):
                 runtime=imdb['runtime'],
                 countries=imdb['countries'],
                 certificates=imdb['certificates'],
-                languages=imdb['languages'],
+                languages=detected_language if detected_language != "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ" else imdb['languages'],
                 director=imdb['director'],
                 writer=imdb['writer'],
                 producer=imdb['producer'],
@@ -2063,6 +2067,7 @@ async def auto_filter(client, msg, spoll=False):
                 plot=imdb['plot'] if settings.get('button') else "N/A",
                 rating=imdb['rating'],
                 url=imdb['url'],
+                grp_lnk=BACKUP_CHANNEL_LINK,
                 **locals()
             )
             temp.IMDB_CAP[message.from_user.id] = cap
