@@ -1527,6 +1527,46 @@ async def userbot_status_cmd(client, message):
     )
 
 
+@Client.on_message(filters.command('db_stats') & filters.user(ADMINS))
+async def db_stats_cmd(client, message):
+    status = await message.reply_text("⏳ Checking database storage breakdown...")
+    try:
+        mongo_db = Media.collection.database
+        collections_to_check = [
+            ("Media (movies)", Media.collection.name),
+            ("Media2 (movies, secondary)", Media2.collection.name) if MULTIPLE_DB else None,
+            ("users", "users"),
+            ("groups", "groups"),
+            ("misc (progress/requests)", "misc"),
+            ("verify_id", "verify_id"),
+            ("userbot_seen_files (dedup tracker)", "userbot_seen_files"),
+            ("filename", "filename"),
+            ("connections", "connections"),
+        ]
+        lines = []
+        total_mb = 0
+        for label, coll_name in collections_to_check:
+            if coll_name is None:
+                continue
+            try:
+                stats = await mongo_db.command("collStats", coll_name)
+                size_mb = stats.get("size", 0) / (1024 * 1024)
+                count = stats.get("count", 0)
+                index_mb = stats.get("totalIndexSize", 0) / (1024 * 1024)
+                total_mb += size_mb + index_mb
+                lines.append(f"<b>{label}</b>\n  Docs: {count:,} | Data: {size_mb:.1f} MB | Index: {index_mb:.1f} MB")
+            except Exception:
+                lines.append(f"<b>{label}</b>\n  (empty or doesn't exist)")
+
+        await status.edit_text(
+            f"📊 <b>Database Storage Breakdown</b>\n\n" + "\n\n".join(lines) +
+            f"\n\n<b>Total (data + indexes): ~{total_mb:.1f} MB</b>"
+        )
+    except Exception as e:
+        logger.exception("[DB_STATS] Failed")
+        await status.edit_text(f"❌ Failed: {e}")
+
+
 @Client.on_message(filters.command('cleanup_duplicates') & filters.user(ADMINS))
 async def cleanup_channel_duplicates_cmd(client, message):
     from info import USERBOT_BACKUP_CHANNEL
