@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import re
+import hashlib
 from collections import deque
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, UserAlreadyParticipant, InviteHashExpired
@@ -84,20 +85,15 @@ def _is_short_video(media, min_duration=240):
     return duration is not None and duration < min_duration
 
 
-_seen_collection = db.db.userbot_seen_files
-_seen_index_ready = False
+_seen_collection = db.db.userbot_seen_hashes  # compact version — stores only a short hash per file, not full names
 
 
-async def _ensure_seen_index():
-    global _seen_index_ready
-    if not _seen_index_ready:
-        try:
-            await _seen_collection.create_index(
-                [("file_name", 1), ("file_size", 1)], unique=True
-            )
-        except Exception as e:
-            logger.error(f"[USERBOT] Could not create unique index on userbot_seen_files: {e}")
-        _seen_index_ready = True
+def _seen_key(file_name, file_size):
+    """A short, fixed-size fingerprint for (cleaned name, size) — takes far less
+    space than storing the full file name in every tracking document."""
+    name = _clean_name(file_name)
+    raw = f"{name}|{file_size}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 async def _already_have_exact_copy(file_name, file_size):
@@ -109,23 +105,26 @@ async def _already_have_exact_copy(file_name, file_size):
     directly caused a race condition where several duplicates got forwarded
     before the first one was even saved).
 
-    Instead, we atomically CLAIM the (name, size) pair ourselves the moment
-    we decide to forward it, using a unique index. If the claim succeeds,
-    we've never seen it before (from us OR pre-existing in the main DB) —
-    proceed. If it fails (duplicate key), someone already claimed it — skip.
+    Instead, we atomically CLAIM a short hash of (name, size) ourselves the
+    moment we decide to forward it — using the hash as the document's own
+    _id (which is unique and indexed by default, no extra index needed).
+    If the claim succeeds, we've never seen it before — proceed.
+    If it fails (duplicate _id), someone already claimed it — skip.
+    This gives the exact same protection as before, but each tracking
+    document is now just a tiny hash instead of a full file name.
     """
-    await _ensure_seen_index()
-    name = _clean_name(file_name)
+    key = _seen_key(file_name, file_size)
 
     # First, an atomic claim against OUR OWN tracker — instant, no race condition.
     try:
-        await _seen_collection.insert_one({"file_name": name, "file_size": file_size})
+        await _seen_collection.insert_one({"_id": key})
     except Exception:
-        # DuplicateKeyError (or any insert failure) means we've already claimed/seen this one.
+        # Duplicate _id means we've already claimed/seen this one.
         return True
 
     # Also check the bot's real database, for files that already existed there
     # BEFORE this userbot session started (not something we forwarded ourselves).
+    name = _clean_name(file_name)
     query = {"file_name": name, "file_size": file_size}
     try:
         if await Media.count_documents(query, limit=1):
