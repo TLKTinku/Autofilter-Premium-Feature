@@ -1640,3 +1640,68 @@ async def cleanup_channel_duplicates_cmd(client, message):
             await status.edit_text(f"❌ Cleanup failed: {e}")
 
     client.loop.create_task(_run())
+
+
+@Client.on_message(filters.command('clear_seen_tracker') & filters.user(ADMINS))
+async def clear_seen_tracker_cmd(client, message):
+    from userbot_index import _seen_collection
+
+    if len(message.command) > 1 and message.command[1].lower() == "confirm":
+        try:
+            result = await _seen_collection.delete_many({})
+            await message.reply_text(f"✅ Cleared {result.deleted_count:,} entries from the dedup tracker. Space freed up.")
+        except Exception as e:
+            await message.reply_text(f"❌ Failed: {e}")
+        return
+
+    try:
+        stats_before = await Media.collection.database.command("collStats", "userbot_seen_files")
+        docs = stats_before.get("count", 0)
+        size_mb = (stats_before.get("size", 0) + stats_before.get("totalIndexSize", 0)) / (1024 * 1024)
+    except Exception:
+        docs, size_mb = 0, 0
+
+    if docs == 0:
+        return await message.reply_text("ℹ️ The dedup tracker is already empty — nothing to clear.")
+
+    await message.reply_text(
+        f"⚠️ <b>This will delete {docs:,} entries (~{size_mb:.1f} MB) from the fast dedup-tracker.</b>\n\n"
+        f"✅ Safe to do once a channel's backfill shows 'done' status — new duplicate checks will still "
+        f"work correctly against your real movie database (just slightly slower, since the instant-tracker won't exist anymore).\n\n"
+        f"Reply with <code>/clear_seen_tracker confirm</code> to proceed."
+    )
+
+
+@Client.on_message(filters.command('strip_captions') & filters.user(ADMINS))
+async def strip_captions_cmd(client, message):
+    if len(message.command) > 1 and message.command[1].lower() == "confirm":
+        status = await message.reply_text("⏳ Stripping stored captions from all movie entries... this can take a while for large databases.")
+        try:
+            total_updated = 0
+            for coll, label in [(Media.collection, "Primary"), (Media2.collection if MULTIPLE_DB else None, "Secondary")]:
+                if coll is None:
+                    continue
+                result = await coll.update_many(
+                    {"caption": {"$ne": None}},
+                    {"$set": {"caption": None}}
+                )
+                total_updated += result.modified_count
+                logger.info(f"[STRIP_CAPTIONS] {label}: updated {result.modified_count}")
+            await status.edit_text(
+                f"✅ <b>Done!</b> Removed stored captions from <code>{total_updated:,}</code> entries.\n\n"
+                f"Note: this frees up space over time as MongoDB reclaims it — check /db_stats again in a bit.\n"
+                f"Movie names are untouched, search still works exactly the same."
+            )
+        except Exception as e:
+            logger.exception("[STRIP_CAPTIONS] Failed")
+            await status.edit_text(f"❌ Failed: {e}")
+        return
+
+    await message.reply_text(
+        "⚠️ <b>This will permanently remove the stored original captions</b> from all movie entries "
+        "(the file name stays, search still works — this only affects the extra caption text that isn't usually needed).\n\n"
+        "This can free up meaningful space if your captions are long.\n\n"
+        "Reply with <code>/strip_captions confirm</code> to proceed.\n\n"
+        "💡 Also consider setting <code>SAVE_CAPTION = False</code> on Render, so newly indexed files "
+        "don't store captions either (prevents this from building up again)."
+    )
