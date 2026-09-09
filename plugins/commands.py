@@ -1475,7 +1475,10 @@ async def userbot_backfill_cmd(client, message):
         )
     if len(message.command) < 2:
         return await message.reply_text(
-            "Usage:\n<code>/userbot_backfill -1001234567890</code>\n\n"
+            "Usage:\n<code>/userbot_backfill -1001234567890</code>\n"
+            "Or to re-scan from the top (catches files missed while live-indexing was broken — "
+            "already-processed ones get skipped almost instantly thanks to duplicate-checking):\n"
+            "<code>/userbot_backfill -1001234567890 restart</code>\n\n"
             f"Channels the userbot currently has access to: <code>{', '.join(str(c) for c in INDEXED_CHAT_IDS) or 'none yet'}</code>\n\n"
             "Check progress anytime with <code>/userbot_status -1001234567890</code>"
         )
@@ -1484,9 +1487,14 @@ async def userbot_backfill_cmd(client, message):
     except ValueError:
         chat_id = message.command[1]
 
+    restart_from_top = len(message.command) > 2 and message.command[2].lower() == "restart"
+
     status = await message.reply_text(
-        "⏳ Starting/resuming full-history backfill... files are being FORWARDED to your backup channel, "
-        "then auto-indexed from there. This can take a long time for large channels.\n\n"
+        ("⏳ Re-scanning from the TOP of the channel (catching up on anything missed)...\n\n"
+         if restart_from_top else
+         "⏳ Starting/resuming full-history backfill... ") +
+        "files are being FORWARDED to your backup channel, "
+        "then auto-indexed from there. Already-processed files will be skipped almost instantly.\n\n"
         "It's SAFE to restart the bot anytime — it will pick up from where it left off, not from scratch.\n\n"
         f"⏸️ Pause: <code>/userbot_pause {chat_id}</code>\n"
         f"▶️ Resume: <code>/userbot_resume {chat_id}</code>\n"
@@ -1496,7 +1504,7 @@ async def userbot_backfill_cmd(client, message):
 
     async def _run():
         try:
-            scanned, forwarded, skipped = await backfill_channel(chat_id)
+            scanned, forwarded, skipped = await backfill_channel(chat_id, resume=not restart_from_top)
             await status.edit_text(
                 f"✅ Backfill complete!\n\nScanned: <code>{scanned}</code>\nForwarded to backup channel: <code>{forwarded}</code>\nFailed: <code>{skipped}</code>"
             )
@@ -1533,23 +1541,24 @@ async def db_stats_cmd(client, message):
     try:
         mongo_db = Media.collection.database
         collections_to_check = [
-            ("Media (movies)", Media.collection.name),
-            ("Media2 (movies, secondary)", Media2.collection.name) if MULTIPLE_DB else None,
-            ("users", "users"),
-            ("groups", "groups"),
-            ("misc (progress/requests)", "misc"),
-            ("verify_id", "verify_id"),
-            ("userbot_seen_files (dedup tracker)", "userbot_seen_files"),
-            ("filename", "filename"),
-            ("connections", "connections"),
+            ("Media (movies) [Primary DB]", Media.collection.database, Media.collection.name),
+            ("Media2 (movies, secondary) [Secondary DB]", Media2.collection.database, Media2.collection.name) if MULTIPLE_DB else None,
+            ("users", mongo_db, "users"),
+            ("groups", mongo_db, "groups"),
+            ("misc (progress/requests)", mongo_db, "misc"),
+            ("verify_id", mongo_db, "verify_id"),
+            ("userbot_seen_hashes (dedup tracker)", mongo_db, "userbot_seen_hashes"),
+            ("filename", mongo_db, "filename"),
+            ("connections", mongo_db, "connections"),
         ]
         lines = []
         total_mb = 0
-        for label, coll_name in collections_to_check:
-            if coll_name is None:
+        for entry in collections_to_check:
+            if entry is None:
                 continue
+            label, db_ref, coll_name = entry
             try:
-                stats = await mongo_db.command("collStats", coll_name)
+                stats = await db_ref.command("collStats", coll_name)
                 size_mb = stats.get("size", 0) / (1024 * 1024)
                 count = stats.get("count", 0)
                 index_mb = stats.get("totalIndexSize", 0) / (1024 * 1024)
