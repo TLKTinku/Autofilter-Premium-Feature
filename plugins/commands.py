@@ -1476,9 +1476,10 @@ async def userbot_backfill_cmd(client, message):
     if len(message.command) < 2:
         return await message.reply_text(
             "Usage:\n<code>/userbot_backfill -1001234567890</code>\n"
-            "Or to re-scan from the top (catches files missed while live-indexing was broken — "
-            "already-processed ones get skipped almost instantly thanks to duplicate-checking):\n"
-            "<code>/userbot_backfill -1001234567890 restart</code>\n\n"
+            "Or to re-scan from the top (catches missed files, skips already-processed ones fast):\n"
+            "<code>/userbot_backfill -1001234567890 restart</code>\n"
+            "Or to jump straight to a specific point (skip everything newer than this message id):\n"
+            "<code>/userbot_backfill -1001234567890 from:123456</code>\n\n"
             f"Channels the userbot currently has access to: <code>{', '.join(str(c) for c in INDEXED_CHAT_IDS) or 'none yet'}</code>\n\n"
             "Check progress anytime with <code>/userbot_status -1001234567890</code>"
         )
@@ -1488,10 +1489,16 @@ async def userbot_backfill_cmd(client, message):
         chat_id = message.command[1]
 
     restart_from_top = len(message.command) > 2 and message.command[2].lower() == "restart"
+    custom_start_id = None
+    if len(message.command) > 2 and message.command[2].lower().startswith("from:"):
+        try:
+            custom_start_id = int(message.command[2].split(":", 1)[1])
+        except ValueError:
+            return await message.reply_text("❌ Invalid format. Use: /userbot_backfill <id> from:123456")
 
     status = await message.reply_text(
-        ("⏳ Re-scanning from the TOP of the channel (catching up on anything missed)...\n\n"
-         if restart_from_top else
+        (f"⏳ Jumping straight to message id {custom_start_id} (skipping everything newer)...\n\n" if custom_start_id else
+         "⏳ Re-scanning from the TOP of the channel (catching up on anything missed)...\n\n" if restart_from_top else
          "⏳ Starting/resuming full-history backfill... ") +
         "files are being FORWARDED to your backup channel, "
         "then auto-indexed from there. Already-processed files will be skipped almost instantly.\n\n"
@@ -1504,7 +1511,11 @@ async def userbot_backfill_cmd(client, message):
 
     async def _run():
         try:
-            scanned, forwarded, skipped = await backfill_channel(chat_id, resume=not restart_from_top)
+            scanned, forwarded, skipped = await backfill_channel(
+                chat_id,
+                resume=not restart_from_top and custom_start_id is None,
+                start_from=custom_start_id
+            )
             await status.edit_text(
                 f"✅ Backfill complete!\n\nScanned: <code>{scanned}</code>\nForwarded to backup channel: <code>{forwarded}</code>\nFailed: <code>{skipped}</code>"
             )
