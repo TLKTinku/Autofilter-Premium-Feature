@@ -237,22 +237,32 @@ async def _backfill_pass(chat_id, progress):
     return scanned, forwarded_count, skipped_count, False
 
 
-async def backfill_channel(chat_id, resume=True):
+async def backfill_channel(chat_id, resume=True, start_from=None):
     """
     Runs continuously until the channel is fully scanned OR the user sends /userbot_stop.
     If an unexpected error happens mid-way, it auto-retries on its own (after a short
     pause) instead of dying and waiting for a manual /userbot_resume.
     Progress is saved after every processed message, so even a crash loses at most
     one message of work — no more duplicate re-forwarding on resume.
+
+    start_from: if given, jumps straight to this message_id (skipping everything
+    newer than it) instead of starting from the top or resuming saved progress.
+    Useful to skip a range you already know is fully covered.
     """
     if not USERBOT_BACKUP_CHANNEL:
         raise RuntimeError("USERBOT_BACKUP_CHANNEL is not set on Render.")
 
+    INDEXED_CHAT_IDS.add(chat_id)  # safety net: make sure live-indexing also covers this channel
     BACKFILL_CONTROL[chat_id] = "running"
     retry_delay = 5
+    first_pass = True
 
     while True:
-        progress = await _get_progress(chat_id) if resume else {}
+        if first_pass and start_from is not None:
+            progress = {"last_message_id": start_from, "scanned": 0, "forwarded": 0, "skipped": 0, "duplicates": 0}
+        else:
+            progress = await _get_progress(chat_id) if resume else {}
+        first_pass = False
         try:
             scanned, forwarded, skipped, stopped = await _backfill_pass(chat_id, progress)
             retry_delay = 5  # reset backoff after a clean pass
@@ -303,6 +313,7 @@ async def start_userbot():
     @userbot.on_message(filters.channel & (filters.video | filters.document))
     async def _on_new_file(client, message):
         if message.chat.id not in INDEXED_CHAT_IDS:
+            logger.info(f"[USERBOT-LIVE] Ignoring message from chat {message.chat.id} ('{message.chat.title}') — not in INDEXED_CHAT_IDS={INDEXED_CHAT_IDS}")
             return  # ignore channels we weren't asked to index
         if not USERBOT_BACKUP_CHANNEL:
             return
