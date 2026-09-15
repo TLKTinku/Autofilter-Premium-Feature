@@ -486,10 +486,17 @@ async def recover_names_from_channels(limit_per_chat=8000):
     return {"scanned": scanned, "fixed": fixed, "skipped": skipped, "samples": samples, "error": None}
 
 
-async def strip_channel_captions(chat_id, limit=4000):
-    """Edit captions on files already posted in ONE channel. Removes links/@usernames."""
-    if not userbot or not userbot.is_connected:
-        return {"scanned": 0, "edited": 0, "skipped": 0, "failed": 0, "error": "userbot off"}
+async def strip_channel_captions(chat_id, limit=12000, wipe=False, bot_client=None, progress_cb=None):
+    """Edit captions already posted in ONE channel.
+
+    wipe=False → links/@username hatao, title rakho
+    wipe=True  → caption khali karo
+    Tries userbot first, then the bot account.
+    """
+    if (not userbot or not userbot.is_connected) and not bot_client:
+        return {"scanned": 0, "edited": 0, "skipped": 0, "failed": 0, "error": "userbot off — USER_SESSION check karo"}
+
+    reader = userbot if (userbot and userbot.is_connected) else bot_client
 
     scanned = 0
     edited = 0
@@ -503,8 +510,37 @@ async def strip_channel_captions(chat_id, limit=4000):
         "edited": 0,
         "failed": 0,
     }
+    last_err = None
+
+    async def _edit(msg, new_cap):
+        nonlocal last_err
+        errors = []
+        for client in (userbot if userbot and userbot.is_connected else None, bot_client):
+            if not client:
+                continue
+            try:
+                if client is userbot:
+                    await msg.edit_caption(new_cap)
+                else:
+                    await client.edit_message_caption(chat_id, msg.id, new_cap)
+                return True
+            except FloodWait as e:
+                await asyncio.sleep(int(getattr(e, "value", 1)) + 1)
+                try:
+                    if client is userbot:
+                        await msg.edit_caption(new_cap)
+                    else:
+                        await client.edit_message_caption(chat_id, msg.id, new_cap)
+                    return True
+                except Exception as e2:
+                    errors.append(str(e2))
+            except Exception as e:
+                errors.append(str(e))
+        last_err = errors[-1] if errors else "edit forbidden"
+        return False
+
     try:
-        async for message in userbot.get_chat_history(chat_id):
+        async for message in reader.get_chat_history(chat_id):
             scanned += 1
             if seen_media >= limit:
                 break
@@ -512,28 +548,27 @@ async def strip_channel_captions(chat_id, limit=4000):
             if not media:
                 continue
             seen_media += 1
-            raw = message.caption
-            if not raw:
-                skipped += 1
-                continue
-            cleaned = _clean_caption(raw)
-            if (cleaned or "") == (raw.strip() if raw else ""):
-                skipped += 1
-                continue
-            try:
-                await message.edit_caption(cleaned)
+            raw = message.caption or ""
+            if wipe:
+                new_cap = ""
+                if not raw:
+                    skipped += 1
+                    continue
+            else:
+                if not raw:
+                    skipped += 1
+                    continue
+                new_cap = _clean_caption(raw) or ""
+                if new_cap.strip() == raw.strip():
+                    skipped += 1
+                    continue
+            ok = await _edit(message, new_cap if new_cap else None)
+            if ok:
                 edited += 1
-                await asyncio.sleep(0.4)
-            except FloodWait as e:
-                await asyncio.sleep(int(getattr(e, "value", 1)) + 1)
-                try:
-                    await message.edit_caption(cleaned)
-                    edited += 1
-                except Exception:
-                    failed += 1
-            except Exception:
+                await asyncio.sleep(0.35)
+            else:
                 failed += 1
-            if seen_media % 20 == 0:
+            if seen_media % 15 == 0:
                 JOBS["strip_captions"] = {
                     "state": "running",
                     "chat_id": chat_id,
@@ -541,7 +576,13 @@ async def strip_channel_captions(chat_id, limit=4000):
                     "edited": edited,
                     "skipped": skipped,
                     "failed": failed,
+                    "last_error": last_err,
                 }
+                if progress_cb:
+                    try:
+                        await progress_cb(scanned, edited, skipped, failed)
+                    except Exception:
+                        pass
     except Exception as e:
         JOBS["strip_captions"] = {
             "state": "error",
@@ -558,6 +599,7 @@ async def strip_channel_captions(chat_id, limit=4000):
             "skipped": skipped,
             "failed": failed,
             "error": str(e),
+            "last_error": last_err,
         }
     JOBS["strip_captions"] = {
         "state": "done",
@@ -566,6 +608,7 @@ async def strip_channel_captions(chat_id, limit=4000):
         "edited": edited,
         "skipped": skipped,
         "failed": failed,
+        "last_error": last_err,
     }
     return {
         "scanned": scanned,
@@ -573,4 +616,5 @@ async def strip_channel_captions(chat_id, limit=4000):
         "skipped": skipped,
         "failed": failed,
         "error": None,
+        "last_error": last_err,
     }
