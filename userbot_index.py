@@ -65,13 +65,20 @@ async def _safe_copy(message, caption=None, label="copy"):
 
 
 def _clean_caption(text):
-    """Strip links and standalone @handles, but keep the real file title."""
+    """Strip every link and @username, keep only the title text."""
     if not text:
         return None
     text = str(text)
-    text = re.sub(r'(https?://\S+|t\.me/\S+|www\.\S+)', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'^@([A-Za-z][A-Za-z0-9]{2,31})_', '', text)
-    text = re.sub(r'(?<!\S)@([A-Za-z][A-Za-z0-9_]{2,31})(?!\S)', '', text)
+    text = re.sub(r'<a\s[^>]*>.*?</a>', ' ', text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(
+        r'(?:https?://|www\.)\S+|(?:t\.me|telegram\.(?:me|dog)|tg://)\S*',
+        ' ',
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r'(?m)(^|[\s\[\(\-])@([A-Za-z][A-Za-z0-9]{2,31})_', r'\1', text)
+    text = re.sub(r'@([A-Za-z][A-Za-z0-9]{3,31})\b', '', text)
     text = re.sub(r'[ \t]+', ' ', text)
     text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
     cleaned = text.strip() or None

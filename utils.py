@@ -401,21 +401,43 @@ async def save_group_settings(group_id, key, value):
     temp.SETTINGS.update({group_id: current})
     await db.update_settings(group_id, current)
 
-def strip_channel_tags(text: str) -> str:
-    """Remove promo @usernames / [channel] tags without eating the real title.
+_URL_RE = re.compile(
+    r'(?:https?://|www\.)\S+|'
+    r'(?:t\.me|telegram\.(?:me|dog)|tg://)\S*',
+    re.IGNORECASE,
+)
+_HTML_LINK_RE = re.compile(r'<a\s[^>]*>.*?</a>', re.IGNORECASE | re.DOTALL)
+_HTML_TAG_RE = re.compile(r'<[^>]+>')
+_EXT_RE = r'(?:mkv|mp4|avi|mov|webm|m4v|ts)'
 
-    Bug this fixes: names like `@abcd_harry_potter.mkv` used to become `.mkv`
-    because `@\w+` treats underscores as part of the mention.
-    """
+
+def strip_channel_tags(text: str) -> str:
+    """Remove links + @usernames, but keep the real movie title."""
     if not text:
         return text or ""
-    text = re.sub(r'(https?://\S+|t\.me/\S+|www\.\S+)', '', text, flags=re.IGNORECASE)
-    # leading @username_ prefix on a filename (keep the title after the first `_`)
-    text = re.sub(r'^@([A-Za-z][A-Za-z0-9]{2,31})_', '', text)
-    # standalone @handles only (3-32 chars, not glued to a long title)
-    text = re.sub(r'(?<!\S)@([A-Za-z][A-Za-z0-9_]{2,31})(?!\S)', '', text)
-    text = re.sub(r'\[@[^\]]+\]|\(@[^)]+\)', '', text)
-    return text
+    text = str(text)
+    text = _HTML_LINK_RE.sub(' ', text)
+    text = _HTML_TAG_RE.sub(' ', text)
+    text = _URL_RE.sub(' ', text)
+    text = re.sub(r'\[@[^\]]+\]|\(@[^)]+\)', ' ', text)
+    # @channel_Movie_Name.mkv → keep Movie_Name.mkv
+    text = re.sub(
+        r'(?m)(^|[\s\[\(\-])@([A-Za-z][A-Za-z0-9]{2,31})_',
+        r'\1',
+        text,
+    )
+    # leftover @username (no extra underscores = handle, not a title)
+    text = re.sub(r'@([A-Za-z][A-Za-z0-9]{3,31})\b', '', text)
+    # glued end-tag: MovieName@channel.mkv / MovieName @channel
+    text = re.sub(
+        rf'@([A-Za-z0-9_]{{3,32}})(?=(?:\.{_EXT_RE})?(?:\s|$))',
+        '',
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+    return text.strip()
 
 
 def clean_filename(file_name):
@@ -532,10 +554,13 @@ def format_file_caption(template, title, size, f_caption):
     quality = extract_quality(search_text)
     language = extract_language(search_text)
     try:
+        safe_caption = strip_channel_tags(f_caption or "")
+        if not safe_caption or re.fullmatch(rf'\.{_EXT_RE}', safe_caption.strip(), re.I):
+            safe_caption = ""
         return template.format(
             file_name=display_name,
             file_size='' if size is None else size,
-            file_caption='' if f_caption is None else f_caption,
+            file_caption=safe_caption,
             quality=quality,
             language=language,
             duration="Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ",
