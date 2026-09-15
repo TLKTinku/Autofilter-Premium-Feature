@@ -19,6 +19,153 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 # ---------------------------------------------------------
 
+_PUNCT_RE = re.compile(r"[^\w\s]+", re.UNICODE)
+_SEASON_TOKEN_RE = re.compile(r'^(?:s|se|ssn|season)0*(\d{1,2})$', re.IGNORECASE)
+_EPISODE_TOKEN_RE = re.compile(r'^(?:e|ep|eps|episode)0*(\d{1,3})$', re.IGNORECASE)
+_SKIP_SEARCH_TOKENS = {
+    "mkv", "mp4", "avi", "mov", "webm", "the", "a", "an", "and", "of", "in", "on",
+    "hindi", "english", "tamil", "telugu", "malayalam", "kannada",
+    "dual", "audio", "multi", "bluray", "webrip", "webdl", "hdrip",
+}
+_USELESS_NAME_RE = re.compile(r'^\.?(mkv|mp4|avi|mov|webm|m4v|ts|zip|rar|iso)?$', re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r'<[^>]+>')
+
+
+def is_useless_filename(name: str) -> bool:
+    n = re.sub(r"\s+", " ", str(name or "")).strip()
+    return (not n) or bool(_USELESS_NAME_RE.fullmatch(n)) or len(n) <= 3
+
+
+def normalize_search_text(text: str) -> str:
+    """Turn any messy title into plain words so dots/symbols don't break search."""
+    if not text:
+        return ""
+    text = str(text).replace("'", "")
+    text = _PUNCT_RE.sub(" ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def collapse_season_episode_tokens(tokens):
+    """season 4 / s 04 / s-2 / episode 3 → s4 / ep3 so variants match."""
+    out = []
+    i = 0
+    while i < len(tokens):
+        t = tokens[i].lower()
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
+        if t in {"s", "se", "ssn", "season"} and re.fullmatch(r'\d{1,2}', nxt):
+            out.append(f"s{int(nxt)}")
+            i += 2
+            continue
+        if t in {"e", "ep", "eps", "episode"} and re.fullmatch(r'\d{1,3}', nxt):
+            out.append(f"ep{int(nxt)}")
+            i += 2
+            continue
+        out.append(tokens[i])
+        i += 1
+    return out
+
+
+def _one_typo_regex(word: str) -> str:
+    """Allow 1 spelling mistake: wrong letter or two letters swapped."""
+    word = word.lower()
+    if len(word) < 4 or len(word) > 14:
+        return re.escape(word)
+    alts = [re.escape(word)]
+    for i in range(len(word)):
+        alts.append(re.escape(word[:i]) + r'.' + re.escape(word[i + 1:]))
+        if i + 1 < len(word):
+            swapped = word[:i] + word[i + 1] + word[i] + word[i + 2:]
+            alts.append(re.escape(swapped))
+    # unique, keep regex size sane
+    uniq = list(dict.fromkeys(alts))[:40]
+    return '(?:' + '|'.join(uniq) + ')'
+
+
+def _token_to_regex(token: str, fuzzy: bool = False) -> str:
+    token = token.strip()
+    if not token:
+        return ""
+    sm = _SEASON_TOKEN_RE.fullmatch(token)
+    if sm:
+        num = int(sm.group(1))
+        return rf"(?:s(?:eason|e|sn)?[\s._-]*0*{num}|season[\s._-]*0*{num})"
+    em = _EPISODE_TOKEN_RE.fullmatch(token)
+    if em:
+        num = int(em.group(1))
+        return rf"(?:e(?:p(?:isode)?)?[\s._-]*0*{num}|episode[\s._-]*0*{num})"
+    if fuzzy:
+        return _one_typo_regex(token)
+    return re.escape(token)
+
+
+def build_flexible_pattern(query: str):
+    """Match titles despite symbols, S02 vs Season 2, and small spelling mistakes."""
+    cleaned = normalize_search_text(query)
+    if not cleaned:
+        return None
+    raw_tokens = cleaned.split()
+    tokens = [t for t in raw_tokens if t.lower() not in _SKIP_SEARCH_TOKENS]
+    tokens = collapse_season_episode_tokens(tokens)
+    tokens = [t for t in tokens if t.lower() not in _SKIP_SEARCH_TOKENS]
+    if not tokens:
+        tokens = collapse_season_episode_tokens(raw_tokens)
+
+    core_tokens = []
+    seen_episode = False
+    for t in tokens:
+        core_tokens.append(t)
+        if _EPISODE_TOKEN_RE.fullmatch(t):
+            seen_episode = True
+            break
+    if not seen_episode:
+        core_tokens = tokens[:6]
+
+    def join_tokens(toks, fuzzy=False):
+        # Fuzzy only the longest title words, never season/episode numbers
+        fuzzy_ids = set()
+        if fuzzy:
+            ranked = [
+                i for i, t in enumerate(toks)
+                if 4 <= len(t) <= 14
+                and not _SEASON_TOKEN_RE.fullmatch(t)
+                and not _EPISODE_TOKEN_RE.fullmatch(t)
+            ]
+            fuzzy_ids = set(ranked[:5])
+        parts = []
+        for i, t in enumerate(toks):
+            part = _token_to_regex(t, fuzzy=(i in fuzzy_ids))
+            if part:
+                parts.append(part)
+        if not parts:
+            return None
+        return r".*?".join(parts)
+
+    patterns = []
+    for toks, use_fuzzy in (
+        (tokens[:10], False),
+        (core_tokens, False),
+        (core_tokens, True),
+        (tokens[:10], True),
+    ):
+        pat = join_tokens(toks, fuzzy=use_fuzzy)
+        if pat and pat not in patterns:
+            patterns.append(pat)
+    if not patterns:
+        return None
+    return "(?:" + ")|(?:".join(patterns) + ")"
+
+
+def name_from_caption(caption: str) -> str:
+    if not caption:
+        return ""
+    text = _HTML_TAG_RE.sub(" ", str(caption))
+    text = re.sub(r'(https?://\S+|t\.me/\S+|www\.\S+)', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^@([A-Za-z][A-Za-z0-9]{2,31})_', '', text.strip())
+    text = re.sub(r'(?<!\S)@([A-Za-z][A-Za-z0-9_]{2,31})(?!\S)', '', text)
+    text = re.sub(r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\@]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return "" if is_useless_filename(text) else text
+
 # Global cache for DB size
 _db_stats_cache = {"timestamp": None, "primary_size": 0.0}
 
@@ -89,10 +236,21 @@ async def check_db_size(db):
 async def save_file(media):
     """Save file in database, with detailed logging."""
     file_id, file_ref = unpack_new_file_id(media.file_id)
+    raw_name = str(media.file_name or "")
+    raw_name = re.sub(r'^@([A-Za-z][A-Za-z0-9]{2,31})_', '', raw_name)
     file_name = re.sub(
-        r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\]", " ", str(media.file_name)
+        r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\@]", " ", raw_name
     )
     file_name = re.sub(r"\s+", " ", file_name).strip()
+    if is_useless_filename(file_name):
+        cap_src = None
+        try:
+            cap_src = media.caption.html if getattr(media, "caption", None) else None
+        except Exception:
+            cap_src = str(getattr(media, "caption", "") or "")
+        recovered = name_from_caption(cap_src or "")
+        if recovered:
+            file_name = recovered
     saveMedia = Media
     target_db = "Primary"
     if MULTIPLE_DB:
@@ -149,29 +307,29 @@ async def get_search_results(chat_id, query, file_type=None, max_results=None, o
                 settings = await get_settings(int(chat_id))
                 max_results = 10 if settings.get("max_btn") else int(MAX_B_TN)
 
-    # This is the new "middle-ground" regex logic for speed and flexibility
     if isinstance(query, list):
-        # This part handles season searches etc., where you need to match any of the full phrases.
-        raw_pattern = '|'.join(re.escape(q.strip()) for q in query if q.strip())
-        regex_list = [re.compile(raw_pattern, re.IGNORECASE)] if raw_pattern else []
-        
+        compiled = []
+        for q in query:
+            pat = build_flexible_pattern(q) or re.escape(normalize_search_text(q) or q)
+            try:
+                compiled.append(re.compile(pat, re.IGNORECASE))
+            except re.error:
+                continue
+        if not compiled:
+            return [], None, 0
+        name_filters = [{"file_name": r} for r in compiled]
         if USE_CAPTION_FILTER:
-            filter_mongo = {"$or": ([{"file_name": r} for r in regex_list] + [{"caption": r} for r in regex_list])}
-        else:
-            filter_mongo = {"$or": [{"file_name": r} for r in regex_list]}
+            name_filters += [{"caption": r} for r in compiled]
+        filter_mongo = {"$or": name_filters}
     else:
-        query = query.strip()
+        query = (query or "").strip()
         if not query:
             return [], None, 0
-            
-        # This is the key change for balancing speed and flexibility
-        if ' ' in query:
-            # For multi-word queries, allow spaces, dots, or hyphens between words.
-            words = [re.escape(word) for word in query.split()]
-            raw_pattern = r'.*'.join(words)
-        else:
-            # For single-word queries, use a flexible substring search.
-            raw_pattern = re.escape(query)
+
+        raw_pattern = build_flexible_pattern(query)
+        if not raw_pattern:
+            cleaned = normalize_search_text(query)
+            raw_pattern = re.escape(cleaned or query)
 
         try:
             regex = re.compile(raw_pattern, flags=re.IGNORECASE)
@@ -417,3 +575,52 @@ async def dreamxbotz_get_series(limit: int = 30) -> Dict[str, List[int]]:
     except Exception as e:
         logger.error(f"Error in dreamxbotz_get_series: {e}")
         return []
+
+
+_BAD_NAME_FILTER = {
+    "file_name": {
+        "$regex": r"^\s*\.?((mkv|mp4|avi|mov|webm|m4v|ts|zip|rar))?\s*$",
+        "$options": "i",
+    }
+}
+
+
+async def repair_broken_filenames():
+    """Fix rows already saved as `.mkv` / empty using caption if a real title exists."""
+    models = [Media]
+    if MULTIPLE_DB:
+        models.append(Media2)
+    scanned = 0
+    fixed = 0
+    unrecoverable = 0
+    samples_fixed = []
+    samples_bad = []
+    for model in models:
+        cursor = model.find(_BAD_NAME_FILTER)
+        docs = await cursor.to_list(length=20000)
+        for doc in docs:
+            scanned += 1
+            recovered = name_from_caption(getattr(doc, "caption", None) or "")
+            if not recovered:
+                unrecoverable += 1
+                if len(samples_bad) < 8:
+                    samples_bad.append(str(getattr(doc, "file_name", ""))[:80])
+                continue
+            try:
+                await model.collection.update_one(
+                    {"_id": doc.file_id},
+                    {"$set": {"file_name": recovered}},
+                )
+                fixed += 1
+                if len(samples_fixed) < 8:
+                    samples_fixed.append(recovered[:80])
+            except Exception as e:
+                logger.error(f"[REPAIR] Failed to update {doc.file_id}: {e}")
+                unrecoverable += 1
+    return {
+        "scanned": scanned,
+        "fixed": fixed,
+        "unrecoverable": unrecoverable,
+        "samples_fixed": samples_fixed,
+        "samples_bad": samples_bad,
+    }
