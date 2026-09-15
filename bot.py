@@ -60,6 +60,12 @@ async def dreamxbotz_start():
     b_users, b_chats = await db.get_banned()
     temp.BANNED_USERS = b_users
     temp.BANNED_CHATS = b_chats
+    try:
+        skip_doc = await db.misc.find_one({"_id": "index_skip"})
+        if skip_doc and skip_doc.get("value") is not None:
+            temp.CURRENT = int(skip_doc["value"])
+    except Exception:
+        pass
     await Media.ensure_indexes()
     if MULTIPLE_DB:
         await Media2.ensure_indexes()

@@ -6,6 +6,7 @@ import hashlib
 from collections import deque
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, UserAlreadyParticipant, InviteHashExpired
+from pymongo.errors import DuplicateKeyError
 
 from info import API_ID, API_HASH, USER_SESSION, USERBOT_CHANNELS, USERBOT_BACKUP_CHANNEL, MULTIPLE_DB
 from database.users_chats_db import db
@@ -23,6 +24,8 @@ INDEXED_CHAT_IDS = set()
 
 # Control flags for active backfills: chat_id -> "running" | "paused" | "stop"
 BACKFILL_CONTROL = {}
+# Immediate jump: chat_id -> message_id. Backfill checks this every message.
+SKIP_TO = {}
 
 # Telegram flood/rate-limit protection.  A single queue is shared by live
 # indexing and backfill so multiple copy requests cannot hit the account at once.
@@ -62,15 +65,19 @@ async def _safe_copy(message, caption=None, label="copy"):
 
 
 def _clean_caption(text):
-    """Strip links, @mentions and t.me references from a caption before re-posting it."""
+    """Strip links and standalone @handles, but keep the real file title."""
     if not text:
         return None
     text = str(text)
     text = re.sub(r'(https?://\S+|t\.me/\S+|www\.\S+)', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'@\w+', '', text)
+    text = re.sub(r'^@([A-Za-z][A-Za-z0-9]{2,31})_', '', text)
+    text = re.sub(r'(?<!\S)@([A-Za-z][A-Za-z0-9_]{2,31})(?!\S)', '', text)
     text = re.sub(r'[ \t]+', ' ', text)
     text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
-    return text.strip() or None
+    cleaned = text.strip() or None
+    if cleaned and re.fullmatch(r'\.(mkv|mp4|avi|mov|webm|m4v|ts)', cleaned, re.I):
+        return None
+    return cleaned
 
 
 def _clean_name(file_name):
@@ -115,25 +122,31 @@ async def _already_have_exact_copy(file_name, file_size):
     """
     key = _seen_key(file_name, file_size)
 
-    # First, an atomic claim against OUR OWN tracker — instant, no race condition.
+    # Fast path: hash tracker is a unique _id lookup.
     try:
-        await _seen_collection.insert_one({"_id": key})
+        if await _seen_collection.find_one({"_id": key}, {"_id": 1}):
+            return True
     except Exception:
-        # Duplicate _id means we've already claimed/seen this one.
-        return True
+        pass
 
-    # Also check the bot's real database, for files that already existed there
-    # BEFORE this userbot session started (not something we forwarded ourselves).
     name = _clean_name(file_name)
     query = {"file_name": name, "file_size": file_size}
     try:
-        if await Media.count_documents(query, limit=1):
+        if await Media.collection.find_one(query, {"_id": 1}):
+            await _seen_collection.update_one({"_id": key}, {"$set": {"via": "media"}}, upsert=True)
             return True
-        if MULTIPLE_DB and await Media2.count_documents(query, limit=1):
+        if MULTIPLE_DB and await Media2.collection.find_one(query, {"_id": 1}):
+            await _seen_collection.update_one({"_id": key}, {"$set": {"via": "media2"}}, upsert=True)
             return True
     except Exception as e:
         logger.error(f"[USERBOT] Duplicate-check against main DB failed (continuing anyway): {e}")
 
+    try:
+        await _seen_collection.insert_one({"_id": key})
+    except DuplicateKeyError:
+        return True
+    except Exception:
+        return False
     return False
 
 
@@ -158,6 +171,14 @@ async def _join_target(target: str):
             chat_ref = int(target) if target.lstrip("-").isdigit() else target
             chat = await userbot.get_chat(chat_ref)
         INDEXED_CHAT_IDS.add(chat.id)
+        try:
+            await db.misc.update_one(
+                {"_id": "userbot_live_chats"},
+                {"$addToSet": {"chat_ids": chat.id}},
+                upsert=True,
+            )
+        except Exception:
+            pass
         logger.info(f"[USERBOT] Ready on channel: {chat.title} ({chat.id})")
         return chat
     except InviteHashExpired:
@@ -189,6 +210,17 @@ async def _backfill_pass(chat_id, progress):
             logger.info(f"[USERBOT-BACKFILL] Stopped by user at message_id={last_seen_id}.")
             BACKFILL_CONTROL.pop(chat_id, None)
             return scanned, forwarded_count, skipped_count, True  # True = fully stopped by user
+
+        jump_to = SKIP_TO.pop(chat_id, None)
+        if jump_to is not None:
+            last_seen_id = int(jump_to)
+            await _save_progress(
+                chat_id, last_message_id=last_seen_id, scanned=scanned,
+                forwarded=forwarded_count, skipped=skipped_count,
+                duplicates=dup_count, status="running"
+            )
+            logger.info(f"[USERBOT-BACKFILL] Skip applied immediately → message_id={last_seen_id}")
+            return await _backfill_pass(chat_id, await _get_progress(chat_id))
 
         last_seen_id = message.id
         scanned += 1
@@ -293,8 +325,34 @@ async def start_userbot():
     me = await userbot.get_me()
     logger.info(f"[USERBOT] Logged in as {me.first_name} ({me.id})")
 
+    try:
+        await Media.collection.create_index([("file_name", 1), ("file_size", 1)], background=True)
+        if MULTIPLE_DB:
+            await Media2.collection.create_index([("file_name", 1), ("file_size", 1)], background=True)
+    except Exception as e:
+        logger.warning(f"[USERBOT] Could not ensure duplicate-check index: {e}")
+
     for target in USERBOT_CHANNELS:
         await _join_target(target)
+
+    # Restore live-forward channels after restart (in-memory set is empty on boot)
+    try:
+        saved = await db.misc.find_one({"_id": "userbot_live_chats"})
+        for cid in (saved or {}).get("chat_ids", []):
+            if cid not in INDEXED_CHAT_IDS:
+                chat = await _join_target(str(cid))
+                if chat:
+                    logger.info(f"[USERBOT] Restored live forward for {cid}")
+        async for doc in db.misc.find({"_id": {"$regex": "^backfill_"}}):
+            chat_id_str = doc["_id"].replace("backfill_", "")
+            try:
+                cid = int(chat_id_str)
+            except ValueError:
+                cid = chat_id_str
+            if cid not in INDEXED_CHAT_IDS:
+                await _join_target(str(cid))
+    except Exception as e:
+        logger.error(f"[USERBOT] Failed to restore live-forward chats: {e}")
 
     # Auto-resume any backfill that was still 'running' when the process last stopped
     # (e.g. due to a Render redeploy/restart) — no manual command needed.

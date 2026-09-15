@@ -401,15 +401,46 @@ async def save_group_settings(group_id, key, value):
     temp.SETTINGS.update({group_id: current})
     await db.update_settings(group_id, current)
 
+def strip_channel_tags(text: str) -> str:
+    """Remove promo @usernames / [channel] tags without eating the real title.
+
+    Bug this fixes: names like `@abcd_harry_potter.mkv` used to become `.mkv`
+    because `@\w+` treats underscores as part of the mention.
+    """
+    if not text:
+        return text or ""
+    text = re.sub(r'(https?://\S+|t\.me/\S+|www\.\S+)', '', text, flags=re.IGNORECASE)
+    # leading @username_ prefix on a filename (keep the title after the first `_`)
+    text = re.sub(r'^@([A-Za-z][A-Za-z0-9]{2,31})_', '', text)
+    # standalone @handles only (3-32 chars, not glued to a long title)
+    text = re.sub(r'(?<!\S)@([A-Za-z][A-Za-z0-9_]{2,31})(?!\S)', '', text)
+    text = re.sub(r'\[@[^\]]+\]|\(@[^)]+\)', '', text)
+    return text
+
+
 def clean_filename(file_name):
-    prefixes = ('[', '@', 'www.')
+    if not file_name:
+        return ""
+    file_name = strip_channel_tags(str(file_name))
+    prefixes = ('[', 'www.')
     unwanted = {word.lower() for word in BAD_WORDS}
-    
-    file_name = ' '.join(
-        word for word in file_name.split()
-        if not (word.startswith(prefixes) or word.lower() in unwanted)
-    )
-    return file_name
+
+    words = []
+    for word in file_name.split():
+        if word.startswith(prefixes) or word.lower() in unwanted:
+            continue
+        # drop a leftover @handle token, but keep `@title_with_underscores.mkv`
+        if word.startswith('@') and re.fullmatch(r'@[A-Za-z][A-Za-z0-9]{2,31}', word):
+            continue
+        if word.startswith('@'):
+            word = word[1:]
+        words.append(word)
+    cleaned = ' '.join(words).strip()
+    if not cleaned or re.fullmatch(r'\.(mkv|mp4|avi|mov|webm|m4v|ts)', cleaned, re.I):
+        fallback = re.sub(r'^@', '', str(file_name))
+        fallback = re.sub(r'[_\-]+', ' ', fallback).strip()
+        return fallback or str(file_name)
+    return cleaned
 
 QUALITY_PATTERNS = [
     '2160p', '4k', '1080p', '720p', '480p', '360p', 'hdrip', 'webrip',
@@ -467,9 +498,10 @@ def clean_display_name(file_name, f_caption):
     if not source:
         return ""
 
-    # 1) Remove links/usernames (always, permanently)
-    source = re.sub(r'(https?://\S+|t\.me/\S+|www\.\S+)', '', source, flags=re.IGNORECASE)
-    source = re.sub(r'@\w+', '', source)
+    # 1) Remove links/usernames without destroying the title
+    source = strip_channel_tags(source)
+    if not source.strip() or re.fullmatch(r'\.(mkv|mp4|avi|mov|webm|m4v|ts)', source.strip(), re.I):
+        source = strip_channel_tags(file_name or "") or (file_name or "")
 
     # 2) Remove emojis
     source = EMOJI_PATTERN.sub('', source)
