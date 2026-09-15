@@ -26,6 +26,19 @@ INDEXED_CHAT_IDS = set()
 BACKFILL_CONTROL = {}
 # Immediate jump: chat_id -> message_id. Backfill checks this every message.
 SKIP_TO = {}
+REPAIR_STATUS = {
+    "state": "idle",
+    "step": "",
+    "chat_id": None,
+    "scanned": 0,
+    "fixed": 0,
+    "skipped": 0,
+    "error": None,
+}
+JOBS = {
+    "repairnames": {"state": "idle"},
+    "strip_captions": {"state": "idle"},
+}
 
 # Telegram flood/rate-limit protection.  A single queue is shared by live
 # indexing and backfill so multiple copy requests cannot hit the account at once.
@@ -421,6 +434,7 @@ async def recover_names_from_channels(limit_per_chat=8000):
     models = [Media]
     if MULTIPLE_DB:
         models.append(Media2)
+    JOBS["repairnames"] = {"state": "running", "step": "channel scan", "scanned": 0, "fixed": 0}
 
     for chat_id in list(chats):
         count = 0
@@ -458,7 +472,105 @@ async def recover_names_from_channels(limit_per_chat=8000):
                     fixed += 1
                     if len(samples) < 8:
                         samples.append(cleaned[:80])
+                if scanned % 50 == 0:
+                    JOBS["repairnames"] = {
+                        "state": "running",
+                        "step": f"channel {chat_id}",
+                        "scanned": scanned,
+                        "fixed": fixed,
+                    }
         except Exception as e:
             logger.error(f"[REPAIR-CHANNEL] chat {chat_id} failed: {e}")
 
+    JOBS["repairnames"] = {"state": "done", "step": "finished", "scanned": scanned, "fixed": fixed}
     return {"scanned": scanned, "fixed": fixed, "skipped": skipped, "samples": samples, "error": None}
+
+
+async def strip_channel_captions(chat_id, limit=4000):
+    """Edit captions on files already posted in ONE channel. Removes links/@usernames."""
+    if not userbot or not userbot.is_connected:
+        return {"scanned": 0, "edited": 0, "skipped": 0, "failed": 0, "error": "userbot off"}
+
+    scanned = 0
+    edited = 0
+    skipped = 0
+    failed = 0
+    seen_media = 0
+    JOBS["strip_captions"] = {
+        "state": "running",
+        "chat_id": chat_id,
+        "scanned": 0,
+        "edited": 0,
+        "failed": 0,
+    }
+    try:
+        async for message in userbot.get_chat_history(chat_id):
+            scanned += 1
+            if seen_media >= limit:
+                break
+            media = message.video or message.document
+            if not media:
+                continue
+            seen_media += 1
+            raw = message.caption
+            if not raw:
+                skipped += 1
+                continue
+            cleaned = _clean_caption(raw)
+            if (cleaned or "") == (raw.strip() if raw else ""):
+                skipped += 1
+                continue
+            try:
+                await message.edit_caption(cleaned)
+                edited += 1
+                await asyncio.sleep(0.4)
+            except FloodWait as e:
+                await asyncio.sleep(int(getattr(e, "value", 1)) + 1)
+                try:
+                    await message.edit_caption(cleaned)
+                    edited += 1
+                except Exception:
+                    failed += 1
+            except Exception:
+                failed += 1
+            if seen_media % 20 == 0:
+                JOBS["strip_captions"] = {
+                    "state": "running",
+                    "chat_id": chat_id,
+                    "scanned": scanned,
+                    "edited": edited,
+                    "skipped": skipped,
+                    "failed": failed,
+                }
+    except Exception as e:
+        JOBS["strip_captions"] = {
+            "state": "error",
+            "chat_id": chat_id,
+            "scanned": scanned,
+            "edited": edited,
+            "skipped": skipped,
+            "failed": failed,
+            "error": str(e),
+        }
+        return {
+            "scanned": scanned,
+            "edited": edited,
+            "skipped": skipped,
+            "failed": failed,
+            "error": str(e),
+        }
+    JOBS["strip_captions"] = {
+        "state": "done",
+        "chat_id": chat_id,
+        "scanned": scanned,
+        "edited": edited,
+        "skipped": skipped,
+        "failed": failed,
+    }
+    return {
+        "scanned": scanned,
+        "edited": edited,
+        "skipped": skipped,
+        "failed": failed,
+        "error": None,
+    }
