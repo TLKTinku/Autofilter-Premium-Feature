@@ -1848,42 +1848,70 @@ async def clean_channel_captions_cmd(client, message):
 
 @Client.on_message(filters.command(['strip_captions', 'stripcaption', 'cleancaption', 'clean_captions']) & filters.user(ADMINS))
 async def strip_captions_cmd(client, message):
-    arg = message.command[1] if len(message.command) > 1 else ""
-    arg_l = arg.lower()
-    # /strip_captions -1001234567890  → usi channel ki captions
-    if arg and (arg.lstrip("-").isdigit()):
-        message.command = ["cleanchannel", arg]
-        return await clean_channel_captions_cmd(client, message)
-    wipe = arg_l in {"confirm", "delete", "yes", "wipe"}
-    status = await message.reply_text(
-        "⏳ Captions saaf ho rahe hain..." if not wipe else "⏳ Saari stored captions delete ho rahi hain..."
-    )
-    try:
-        total_updated = 0
-        collections = [(Media.collection, "Primary")]
-        if MULTIPLE_DB:
-            collections.append((Media2.collection, "Secondary"))
-        for coll, label in collections:
-            if wipe:
-                result = await coll.update_many(
-                    {"caption": {"$nin": [None, ""]}},
-                    {"$set": {"caption": None}},
-                )
-                total_updated += result.modified_count
-            else:
-                cursor = coll.find({"caption": {"$nin": [None, ""]}}, {"caption": 1})
-                async for doc in cursor:
-                    raw = doc.get("caption") or ""
-                    cleaned = strip_channel_tags(raw)
-                    if cleaned != raw:
-                        await coll.update_one({"_id": doc["_id"]}, {"$set": {"caption": cleaned or None}})
-                        total_updated += 1
-            logger.info(f"[STRIP_CAPTIONS] {label}: {total_updated}")
-        await status.edit_text(
-            f"✅ Caption clean ho gaya.\nUpdated: <code>{total_updated:,}</code>\n\n"
-            f"{'Captions delete ho gayi.' if wipe else 'Links aur @username caption se hata diye.'}\n"
-            f"Poori caption mitani ho to: <code>/strip_captions delete</code>"
+    args = message.command[1:]
+    wipe = any(a.lower() in {"delete", "confirm", "yes", "wipe", "clear"} for a in args)
+    chat_id = None
+    for a in args:
+        if a.lstrip("-").isdigit():
+            chat_id = int(a)
+            break
+    if chat_id is None:
+        chat_id = USERBOT_BACKUP_CHANNEL
+    if not chat_id:
+        return await message.reply_text(
+            "Channel id do:\n<code>/strip_captions -1001234567890</code>\n\n"
+            "Ya Render pe <code>USERBOT_BACKUP_CHANNEL</code> set karo."
         )
-    except Exception as e:
-        logger.exception("[STRIP_CAPTIONS] Failed")
-        await status.edit_text(f"❌ Failed: <code>{e}</code>")
+
+    mode = "caption DELETE" if wipe else "link + @username hatao"
+    status = await message.reply_text(
+        f"🧹 Channel captions edit shuru\n"
+        f"Channel: <code>{chat_id}</code>\n"
+        f"Mode: <b>{mode}</b>\n\n"
+        f"Status: <code>/jobstatus</code>\n"
+        f"/restart mat dena."
+    )
+
+    async def progress(scanned, edited, skipped, failed):
+        try:
+            await status.edit_text(
+                f"🧹 Chal raha hai...\n"
+                f"Channel: <code>{chat_id}</code>\n"
+                f"Dekhe: <code>{scanned}</code> | Edit: <code>{edited}</code> | "
+                f"Skip: <code>{skipped}</code> | Fail: <code>{failed}</code>"
+            )
+        except Exception:
+            pass
+
+    async def _run():
+        try:
+            from userbot_index import strip_channel_captions
+            result = await strip_channel_captions(
+                chat_id,
+                wipe=wipe,
+                bot_client=client,
+                progress_cb=progress,
+            )
+        except Exception as e:
+            return await status.edit_text(f"❌ Fail: <code>{e}</code>")
+        extra = ""
+        if result.get("error"):
+            extra += f"\n\n⚠️ {result['error']}"
+        if result.get("last_error") and result.get("failed"):
+            extra += f"\nLast Telegram error: <code>{result['last_error']}</code>"
+        extra += (
+            "\n\nFail tab hota hai jab post userbot/bot ne nahi bheji. "
+            "Telegram doosre ke message ki caption edit nahi karta."
+        )
+        await status.edit_text(
+            f"✅ Caption kaam khatam\n"
+            f"Channel: <code>{chat_id}</code>\n"
+            f"Mode: <b>{mode}</b>\n"
+            f"Messages: <code>{result.get('scanned', 0)}</code>\n"
+            f"Edit hue: <code>{result.get('edited', 0)}</code>\n"
+            f"Skip: <code>{result.get('skipped', 0)}</code>\n"
+            f"Fail: <code>{result.get('failed', 0)}</code>"
+            + extra
+        )
+
+    client.loop.create_task(_run())
