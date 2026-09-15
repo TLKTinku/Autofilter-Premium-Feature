@@ -24,8 +24,16 @@ _SEASON_TOKEN_RE = re.compile(r'^(?:s|se|ssn|season)0*(\d{1,2})$', re.IGNORECASE
 _EPISODE_TOKEN_RE = re.compile(r'^(?:e|ep|eps|episode)0*(\d{1,3})$', re.IGNORECASE)
 _SKIP_SEARCH_TOKENS = {
     "mkv", "mp4", "avi", "mov", "webm", "the", "a", "an", "and", "of", "in", "on",
-    "hindi", "english", "tamil", "telugu", "malayalam", "kannada",
     "dual", "audio", "multi", "bluray", "webrip", "webdl", "hdrip",
+}
+_LANG_ALIASES = {
+    "hinid": "hindi", "hidi": "hindi", "hndi": "hindi", "hind": "hindi",
+    "hin": "hindi", "hindhi": "hindi",
+    "engilsh": "english", "englsh": "english", "eng": "english",
+    "tam": "tamil", "tml": "tamil",
+    "tel": "telugu", "telgu": "telugu",
+    "mal": "malayalam", "mallu": "malayalam",
+    "kan": "kannada",
 }
 _USELESS_NAME_RE = re.compile(r'^\.?(mkv|mp4|avi|mov|webm|m4v|ts|zip|rar|iso)?$', re.IGNORECASE)
 _HTML_TAG_RE = re.compile(r'<[^>]+>')
@@ -98,17 +106,39 @@ def _token_to_regex(token: str, fuzzy: bool = False) -> str:
     return re.escape(token)
 
 
-def build_flexible_pattern(query: str):
-    """Match titles despite symbols, S02 vs Season 2, and small spelling mistakes."""
+def _query_tokens(query: str):
     cleaned = normalize_search_text(query)
     if not cleaned:
-        return None
+        return []
     raw_tokens = cleaned.split()
-    tokens = [t for t in raw_tokens if t.lower() not in _SKIP_SEARCH_TOKENS]
+    tokens = []
+    for t in raw_tokens:
+        low = t.lower()
+        if low in _SKIP_SEARCH_TOKENS:
+            continue
+        tokens.append(_LANG_ALIASES.get(low, t))
     tokens = collapse_season_episode_tokens(tokens)
     tokens = [t for t in tokens if t.lower() not in _SKIP_SEARCH_TOKENS]
+    return tokens or collapse_season_episode_tokens(raw_tokens)
+
+
+def build_strict_pattern(query: str):
+    """All typed words must match. No fuzzy, no extra similar titles."""
+    tokens = _query_tokens(query)
     if not tokens:
-        tokens = collapse_season_episode_tokens(raw_tokens)
+        return None
+    parts = [_token_to_regex(t, fuzzy=False) for t in tokens[:12]]
+    parts = [p for p in parts if p]
+    if not parts:
+        return None
+    return r".*?".join(parts)
+
+
+def build_flexible_pattern(query: str):
+    """Fallback only: S02 vs Season 2 and small spelling mistakes."""
+    tokens = _query_tokens(query)
+    if not tokens:
+        return None
 
     core_tokens = []
     seen_episode = False
@@ -314,6 +344,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=None, o
                 settings = await get_settings(int(chat_id))
                 max_results = 10 if settings.get("max_btn") else int(MAX_B_TN)
 
+    _fallback_fuzzy = False
     if isinstance(query, list):
         compiled = []
         for q in query:
@@ -333,7 +364,9 @@ async def get_search_results(chat_id, query, file_type=None, max_results=None, o
         if not query:
             return [], None, 0
 
-        raw_pattern = build_flexible_pattern(query)
+        strict_pat = build_strict_pattern(query)
+        fuzzy_pat = build_flexible_pattern(query)
+        raw_pattern = strict_pat or fuzzy_pat
         if not raw_pattern:
             cleaned = normalize_search_text(query)
             raw_pattern = re.escape(cleaned or query)
@@ -347,6 +380,7 @@ async def get_search_results(chat_id, query, file_type=None, max_results=None, o
             filter_mongo = {"$or": [{"file_name": regex}, {"caption": regex}]}
         else:
             filter_mongo = {"file_name": regex}
+        _fallback_fuzzy = bool(strict_pat and fuzzy_pat and fuzzy_pat != strict_pat)
 
     if file_type:
         filter_mongo["file_type"] = file_type
@@ -394,6 +428,51 @@ async def get_search_results(chat_id, query, file_type=None, max_results=None, o
         next_offset = offset + len(files)
         if next_offset >= total_results:
             next_offset = ""
+
+    if (not files) and _fallback_fuzzy and offset == 0:
+        try:
+            regex = re.compile(fuzzy_pat, flags=re.IGNORECASE)
+        except re.error:
+            return files, next_offset, total_results
+        if USE_CAPTION_FILTER:
+            filter_mongo = {"$or": [{"file_name": regex}, {"caption": regex}]}
+        else:
+            filter_mongo = {"file_name": regex}
+        if file_type:
+            filter_mongo["file_type"] = file_type
+        if ULTRA_FAST_MODE:
+            limit = max_results + 1
+            find_tasks = [Media.find(filter_mongo).sort("$natural", -1).skip(0).limit(limit).to_list(length=limit)]
+            if MULTIPLE_DB:
+                find_tasks.append(Media2.find(filter_mongo).sort("$natural", -1).skip(0).limit(limit).to_list(length=limit))
+            results = await asyncio.gather(*find_tasks)
+            files = results[0]
+            if MULTIPLE_DB and len(results) > 1:
+                files.extend(results[1])
+            files = files[:limit]
+            has_next_page = len(files) > max_results
+            if has_next_page:
+                files = files[:-1]
+            next_offset = len(files) if has_next_page else ""
+            total_results = len(files) + (1 if has_next_page else 0)
+        else:
+            count_tasks = [Media.count_documents(filter_mongo)]
+            find_tasks = [Media.find(filter_mongo).sort("$natural", -1).limit(max_results).to_list(length=max_results)]
+            if MULTIPLE_DB:
+                count_tasks.append(Media2.count_documents(filter_mongo))
+                find_tasks.append(Media2.find(filter_mongo).sort("$natural", -1).limit(max_results).to_list(length=max_results))
+            count_results, find_results = await asyncio.gather(
+                asyncio.gather(*count_tasks),
+                asyncio.gather(*find_tasks),
+            )
+            total_results = sum(count_results)
+            files = find_results[0]
+            if MULTIPLE_DB and len(find_results) > 1:
+                files.extend(find_results[1])
+            files = files[:max_results]
+            next_offset = len(files)
+            if next_offset >= total_results:
+                next_offset = ""
 
     return files, next_offset, total_results
 
