@@ -10,7 +10,7 @@ from umongo import Instance, Document, fields
 from motor.motor_asyncio import AsyncIOMotorClient
 from marshmallow import ValidationError
 from info import *
-from utils import get_settings, save_group_settings
+from utils import get_settings, save_group_settings, strip_channel_tags
 from datetime import datetime, timedelta
 import logging
 import asyncio
@@ -158,10 +158,17 @@ def build_flexible_pattern(query: str):
 def name_from_caption(caption: str) -> str:
     if not caption:
         return ""
-    text = _HTML_TAG_RE.sub(" ", str(caption))
-    text = re.sub(r'(https?://\S+|t\.me/\S+|www\.\S+)', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'^@([A-Za-z][A-Za-z0-9]{2,31})_', '', text.strip())
-    text = re.sub(r'(?<!\S)@([A-Za-z][A-Za-z0-9_]{2,31})(?!\S)', '', text)
+    text = strip_channel_tags(str(caption))
+    text = _HTML_TAG_RE.sub(" ", text)
+    text = re.sub(r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\@]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return "" if is_useless_filename(text) else text
+
+
+def clean_media_filename(raw_name: str) -> str:
+    if not raw_name:
+        return ""
+    text = strip_channel_tags(str(raw_name))
     text = re.sub(r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\@]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return "" if is_useless_filename(text) else text
@@ -579,14 +586,17 @@ async def dreamxbotz_get_series(limit: int = 30) -> Dict[str, List[int]]:
 
 _BAD_NAME_FILTER = {
     "file_name": {
-        "$regex": r"^\s*\.?((mkv|mp4|avi|mov|webm|m4v|ts|zip|rar))?\s*$",
+        "$regex": (
+            r"(^\s*\.?((mkv|mp4|avi|mov|webm|m4v|ts|zip|rar))?\s*$)"
+            r"|(^(bbot|seeai)(\s+bbot)?(\s+\.?mkv)?$)"
+        ),
         "$options": "i",
     }
 }
 
 
 async def repair_broken_filenames():
-    """Fix rows already saved as `.mkv` / empty using caption if a real title exists."""
+    """Fix rows saved as `.mkv` / empty / leftover bot-name using caption."""
     models = [Media]
     if MULTIPLE_DB:
         models.append(Media2)
@@ -597,10 +607,12 @@ async def repair_broken_filenames():
     samples_bad = []
     for model in models:
         cursor = model.find(_BAD_NAME_FILTER)
-        docs = await cursor.to_list(length=20000)
+        docs = await cursor.to_list(length=50000)
         for doc in docs:
             scanned += 1
             recovered = name_from_caption(getattr(doc, "caption", None) or "")
+            if not recovered:
+                recovered = clean_media_filename(getattr(doc, "file_name", "") or "")
             if not recovered:
                 unrecoverable += 1
                 if len(samples_bad) < 8:
