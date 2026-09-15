@@ -10,7 +10,7 @@ from pymongo.errors import DuplicateKeyError
 
 from info import API_ID, API_HASH, USER_SESSION, USERBOT_CHANNELS, USERBOT_BACKUP_CHANNEL, MULTIPLE_DB
 from database.users_chats_db import db
-from database.ia_filterdb import Media, Media2
+from database.ia_filterdb import Media, Media2, unpack_new_file_id, is_useless_filename, clean_media_filename
 
 logger = logging.getLogger(__name__)
 
@@ -401,3 +401,64 @@ async def start_userbot():
             logger.error(f"[USERBOT-LIVE] Failed after retries for message {message.id}: {e}")
 
     logger.info(f"[USERBOT] Live indexing active for {len(INDEXED_CHAT_IDS)} channel(s), forwarding into {USERBOT_BACKUP_CHANNEL}.")
+
+
+async def recover_names_from_channels(limit_per_chat=8000):
+    """Read real Telegram file names from backup/source channels and fix DB rows."""
+    if not userbot or not userbot.is_connected:
+        return {"scanned": 0, "fixed": 0, "skipped": 0, "error": "userbot off"}
+
+    chats = set(INDEXED_CHAT_IDS)
+    if USERBOT_BACKUP_CHANNEL:
+        chats.add(USERBOT_BACKUP_CHANNEL)
+    if not chats:
+        return {"scanned": 0, "fixed": 0, "skipped": 0, "error": "no channels"}
+
+    scanned = 0
+    fixed = 0
+    skipped = 0
+    samples = []
+    models = [Media]
+    if MULTIPLE_DB:
+        models.append(Media2)
+
+    for chat_id in list(chats):
+        count = 0
+        try:
+            async for message in userbot.get_chat_history(chat_id):
+                count += 1
+                if count > limit_per_chat:
+                    break
+                media = message.video or message.document
+                if not media or not getattr(media, "file_name", None):
+                    continue
+                scanned += 1
+                cleaned = clean_media_filename(media.file_name)
+                if not cleaned:
+                    skipped += 1
+                    continue
+                try:
+                    packed, _ = unpack_new_file_id(media.file_id)
+                except Exception:
+                    skipped += 1
+                    continue
+                updated = False
+                for model in models:
+                    doc = await model.collection.find_one({"_id": packed}, {"file_name": 1})
+                    if not doc:
+                        continue
+                    current = doc.get("file_name") or ""
+                    if current != cleaned and (is_useless_filename(current) or current.lower() in {"bbot", "seeai", "seeai bbot"}):
+                        await model.collection.update_one(
+                            {"_id": packed},
+                            {"$set": {"file_name": cleaned}},
+                        )
+                        updated = True
+                if updated:
+                    fixed += 1
+                    if len(samples) < 8:
+                        samples.append(cleaned[:80])
+        except Exception as e:
+            logger.error(f"[REPAIR-CHANNEL] chat {chat_id} failed: {e}")
+
+    return {"scanned": scanned, "fixed": fixed, "skipped": skipped, "samples": samples, "error": None}
