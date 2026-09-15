@@ -1418,11 +1418,47 @@ async def reset_trial(client, message):
         await message.reply_text(f"An error occurred: {e}")
 
 
+@Client.on_message(filters.command(['jobstatus', 'jobs', 'taskstatus']) & filters.user(ADMINS))
+async def job_status_cmd(client, message):
+    from userbot_index import JOBS, BACKFILL_CONTROL, _get_progress, INDEXED_CHAT_IDS
+    lines = ["📊 <b>Jobs status</b>\n"]
+    repair = JOBS.get("repairnames") or {}
+    lines.append(
+        f"🔧 /repairnames: <code>{repair.get('state', 'idle')}</code>\n"
+        f"Step: <code>{repair.get('step', '-')}</code> | "
+        f"Scanned: <code>{repair.get('scanned', 0)}</code> | "
+        f"Fixed: <code>{repair.get('fixed', 0)}</code>"
+    )
+    strip = JOBS.get("strip_captions") or {}
+    lines.append(
+        f"\n🧹 /strip_captions: <code>{strip.get('state', 'idle')}</code>\n"
+        f"Channel: <code>{strip.get('chat_id', '-')}</code> | "
+        f"Edited: <code>{strip.get('edited', 0)}</code> | "
+        f"Failed: <code>{strip.get('failed', 0)}</code> | "
+        f"Scanned: <code>{strip.get('scanned', 0)}</code>"
+    )
+    if BACKFILL_CONTROL:
+        for cid, st in BACKFILL_CONTROL.items():
+            p = await _get_progress(cid)
+            lines.append(
+                f"\n📦 backfill <code>{cid}</code>: <code>{st}</code>\n"
+                f"At msg: <code>{p.get('last_message_id', 0)}</code> | "
+                f"Forwarded: <code>{p.get('forwarded', 0)}</code> | "
+                f"Dups: <code>{p.get('duplicates', 0)}</code>"
+            )
+    else:
+        lines.append("\n📦 backfill: idle")
+    lines.append(f"\nLive channels: <code>{', '.join(str(c) for c in INDEXED_CHAT_IDS) or 'none'}</code>")
+    await message.reply_text("\n".join(lines))
+
+
 @Client.on_message(filters.command(['repairnames', 'fixnames', 'fixmkv']) & filters.user(ADMINS))
 async def repair_names_cmd(client, message):
+    from userbot_index import JOBS
+    JOBS["repairnames"] = {"state": "running", "step": "db scan", "scanned": 0, "fixed": 0}
     status = await message.reply_text(
         "🔧 Step 1/2: DB mein broken naam scan...\n"
-        "Phir channel se asli Telegram filename padhunga."
+        "Status dekhne ke liye: <code>/jobstatus</code>"
     )
     try:
         from database.ia_filterdb import repair_broken_filenames
@@ -1766,10 +1802,59 @@ async def clear_seen_tracker_cmd(client, message):
     )
 
 
+@Client.on_message(filters.command(['cleanchannel', 'stripchannel']) & filters.user(ADMINS))
+async def clean_channel_captions_cmd(client, message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "Sirf <b>ek channel</b> ki captions saaf karni hon to:\n\n"
+            "<code>/cleanchannel -1001234567890</code>\n\n"
+            "Is ID wale channel se link aur @username hatenge.\n"
+            "Doosre channels touch nahi honge.\n\n"
+            "Note: Telegram sirf un messages ki caption edit karne deta hai "
+            "jo <b>userbot ne khud post/copy</b> kiye hon."
+        )
+    try:
+        chat_id = int(message.command[1])
+    except ValueError:
+        return await message.reply_text("❌ Channel id number hona chahiye, jaise <code>-1001234567890</code>")
+    status = await message.reply_text(
+        f"🧹 Sirf is channel ki captions saaf ho rahi hain:\n<code>{chat_id}</code>\n\n"
+        f"2-3k files par time lagega. /restart mat dena."
+    )
+
+    async def _run():
+        try:
+            from userbot_index import strip_channel_captions
+            result = await strip_channel_captions(chat_id)
+        except Exception as e:
+            return await status.edit_text(f"❌ Fail: <code>{e}</code>")
+        extra = f"\n\n⚠️ {result['error']}" if result.get("error") else ""
+        extra += (
+            "\n\nAgar Failed zyada hai to un posts ko userbot ne nahi bheja. "
+            "Unki caption Telegram edit nahi karne deta."
+        )
+        await status.edit_text(
+            f"✅ Channel caption clean\n"
+            f"Channel: <code>{chat_id}</code>\n"
+            f"Messages dekhe: <code>{result.get('scanned', 0)}</code>\n"
+            f"Caption edit: <code>{result.get('edited', 0)}</code>\n"
+            f"Skip (pehle se clean/khali): <code>{result.get('skipped', 0)}</code>\n"
+            f"Edit nahi ho saki: <code>{result.get('failed', 0)}</code>"
+            + extra
+        )
+
+    client.loop.create_task(_run())
+
+
 @Client.on_message(filters.command(['strip_captions', 'stripcaption', 'cleancaption', 'clean_captions']) & filters.user(ADMINS))
 async def strip_captions_cmd(client, message):
-    arg = message.command[1].lower() if len(message.command) > 1 else ""
-    wipe = arg in {"confirm", "delete", "yes", "wipe"}
+    arg = message.command[1] if len(message.command) > 1 else ""
+    arg_l = arg.lower()
+    # /strip_captions -1001234567890  → usi channel ki captions
+    if arg and (arg.lstrip("-").isdigit()):
+        message.command = ["cleanchannel", arg]
+        return await clean_channel_captions_cmd(client, message)
+    wipe = arg_l in {"confirm", "delete", "yes", "wipe"}
     status = await message.reply_text(
         "⏳ Captions saaf ho rahe hain..." if not wipe else "⏳ Saari stored captions delete ho rahi hain..."
     )
