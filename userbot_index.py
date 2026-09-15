@@ -77,8 +77,10 @@ def _clean_caption(text):
         text,
         flags=re.IGNORECASE,
     )
+    text = re.sub(r'(?i)@?seeai_bbot\b|@?seeai\b', '', text)
+    # @user or @user_name (1 underscore max) poora hatao
+    text = re.sub(r'@([A-Za-z][A-Za-z0-9]{2,31}(?:_[A-Za-z0-9]{2,31})?)\b', '', text)
     text = re.sub(r'(?m)(^|[\s\[\(\-])@([A-Za-z][A-Za-z0-9]{2,31})_', r'\1', text)
-    text = re.sub(r'@([A-Za-z][A-Za-z0-9]{3,31})\b', '', text)
     text = re.sub(r'[ \t]+', ' ', text)
     text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
     cleaned = text.strip() or None

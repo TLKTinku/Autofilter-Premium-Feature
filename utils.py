@@ -409,6 +409,11 @@ _URL_RE = re.compile(
 _HTML_LINK_RE = re.compile(r'<a\s[^>]*>.*?</a>', re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r'<[^>]+>')
 _EXT_RE = r'(?:mkv|mp4|avi|mov|webm|m4v|ts)'
+# Full usernames that must be removed even without @
+_PROMO_HANDLES = {
+    "seeai_bbot",
+    "seeai",
+}
 
 
 def strip_channel_tags(text: str) -> str:
@@ -420,15 +425,23 @@ def strip_channel_tags(text: str) -> str:
     text = _HTML_TAG_RE.sub(' ', text)
     text = _URL_RE.sub(' ', text)
     text = re.sub(r'\[@[^\]]+\]|\(@[^)]+\)', ' ', text)
+    # known handles first: @Seeai_bbot AND Seeai_bbot (poora naam)
+    for handle in _PROMO_HANDLES:
+        text = re.sub(rf'@?{re.escape(handle)}\b', '', text, flags=re.IGNORECASE)
+    # @user or @user_name (max 1 underscore) = Telegram username, poora hatao
+    # @abcd_hatry_potter (2+ underscores) ko yahan nahi chhedna
+    text = re.sub(
+        r'@([A-Za-z][A-Za-z0-9]{2,31}(?:_[A-Za-z0-9]{2,31})?)\b',
+        '',
+        text,
+    )
     # @channel_Movie_Name.mkv → keep Movie_Name.mkv
     text = re.sub(
         r'(?m)(^|[\s\[\(\-])@([A-Za-z][A-Za-z0-9]{2,31})_',
         r'\1',
         text,
     )
-    # leftover @username (no extra underscores = handle, not a title)
-    text = re.sub(r'@([A-Za-z][A-Za-z0-9]{3,31})\b', '', text)
-    # glued end-tag: MovieName@channel.mkv / MovieName @channel
+    # glued end-tag: MovieName@channel.mkv
     text = re.sub(
         rf'@([A-Za-z0-9_]{{3,32}})(?=(?:\.{_EXT_RE})?(?:\s|$))',
         '',
