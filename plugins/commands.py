@@ -1421,29 +1421,46 @@ async def reset_trial(client, message):
 @Client.on_message(filters.command(['repairnames', 'fixnames', 'fixmkv']) & filters.user(ADMINS))
 async def repair_names_cmd(client, message):
     status = await message.reply_text(
-        "🔧 Purani <code>.mkv</code> / empty naam wali files scan ho rahi hain...\n"
-        "Jahan caption mein title bacha hoga wahan naam recover hoga."
+        "🔧 Step 1/2: DB mein broken naam scan...\n"
+        "Phir channel se asli Telegram filename padhunga."
     )
     try:
         from database.ia_filterdb import repair_broken_filenames
         result = await repair_broken_filenames()
     except Exception as e:
         return await status.edit_text(f"❌ Repair fail: <code>{e}</code>")
-    extra = ""
-    if result["samples_fixed"]:
-        extra += "\n\n✅ Recovered examples:\n" + "\n".join(
-            f"• <code>{n}</code>" for n in result["samples_fixed"]
-        )
-    if result["unrecoverable"]:
-        extra += (
-            "\n\n⚠️ Jo recover nahi hui unka original title DB mein hi nahi hai. "
-            "Unhe source channel se dubara index karna padega."
-        )
+
     await status.edit_text(
-        f"✅ Repair complete\n"
-        f"Scanned broken names: <code>{result['scanned']}</code>\n"
-        f"Fixed: <code>{result['fixed']}</code>\n"
-        f"Could not recover: <code>{result['unrecoverable']}</code>"
+        f"Step 1 done — DB fixed: <code>{result['fixed']}</code>\n"
+        f"Step 2/2: backup/source channel se naam recover ho rahe hain..."
+    )
+    channel_result = {"scanned": 0, "fixed": 0, "skipped": 0, "samples": [], "error": "skip"}
+    try:
+        from userbot_index import recover_names_from_channels
+        channel_result = await recover_names_from_channels()
+    except Exception as e:
+        channel_result = {"scanned": 0, "fixed": 0, "skipped": 0, "samples": [], "error": str(e)}
+
+    extra = ""
+    samples = result.get("samples_fixed") or []
+    samples += channel_result.get("samples") or []
+    if samples:
+        extra += "\n\n✅ Examples:\n" + "\n".join(f"• <code>{n}</code>" for n in samples[:8])
+    if channel_result.get("error") and channel_result["error"] not in (None, "skip"):
+        extra += f"\n\n⚠️ Channel scan: <code>{channel_result['error']}</code>"
+    extra += (
+        "\n\nNote: Telegram par jo file pehle se <code>.mkv</code> naam se upload ho chuki hai, "
+        "uska download naam tabhi badlega jab source channel par uska real naam ho. "
+        "Bot copy se Telegram ka original filename change nahi kar sakta."
+    )
+    await status.edit_text(
+        f"✅ Repair complete\n\n"
+        f"<b>DB caption repair</b>\n"
+        f"Scanned: <code>{result['scanned']}</code> | Fixed: <code>{result['fixed']}</code> | "
+        f"No title: <code>{result['unrecoverable']}</code>\n\n"
+        f"<b>Channel filename repair</b>\n"
+        f"Scanned files: <code>{channel_result.get('scanned', 0)}</code> | "
+        f"Fixed: <code>{channel_result.get('fixed', 0)}</code>"
         + extra
     )
 
@@ -1749,36 +1766,39 @@ async def clear_seen_tracker_cmd(client, message):
     )
 
 
-@Client.on_message(filters.command('strip_captions') & filters.user(ADMINS))
+@Client.on_message(filters.command(['strip_captions', 'stripcaption', 'cleancaption', 'clean_captions']) & filters.user(ADMINS))
 async def strip_captions_cmd(client, message):
-    if len(message.command) > 1 and message.command[1].lower() == "confirm":
-        status = await message.reply_text("⏳ Stripping stored captions from all movie entries... this can take a while for large databases.")
-        try:
-            total_updated = 0
-            for coll, label in [(Media.collection, "Primary"), (Media2.collection if MULTIPLE_DB else None, "Secondary")]:
-                if coll is None:
-                    continue
+    arg = message.command[1].lower() if len(message.command) > 1 else ""
+    wipe = arg in {"confirm", "delete", "yes", "wipe"}
+    status = await message.reply_text(
+        "⏳ Captions saaf ho rahe hain..." if not wipe else "⏳ Saari stored captions delete ho rahi hain..."
+    )
+    try:
+        total_updated = 0
+        collections = [(Media.collection, "Primary")]
+        if MULTIPLE_DB:
+            collections.append((Media2.collection, "Secondary"))
+        for coll, label in collections:
+            if wipe:
                 result = await coll.update_many(
-                    {"caption": {"$ne": None}},
-                    {"$set": {"caption": None}}
+                    {"caption": {"$nin": [None, ""]}},
+                    {"$set": {"caption": None}},
                 )
                 total_updated += result.modified_count
-                logger.info(f"[STRIP_CAPTIONS] {label}: updated {result.modified_count}")
-            await status.edit_text(
-                f"✅ <b>Done!</b> Removed stored captions from <code>{total_updated:,}</code> entries.\n\n"
-                f"Note: this frees up space over time as MongoDB reclaims it — check /db_stats again in a bit.\n"
-                f"Movie names are untouched, search still works exactly the same."
-            )
-        except Exception as e:
-            logger.exception("[STRIP_CAPTIONS] Failed")
-            await status.edit_text(f"❌ Failed: {e}")
-        return
-
-    await message.reply_text(
-        "⚠️ <b>This will permanently remove the stored original captions</b> from all movie entries "
-        "(the file name stays, search still works — this only affects the extra caption text that isn't usually needed).\n\n"
-        "This can free up meaningful space if your captions are long.\n\n"
-        "Reply with <code>/strip_captions confirm</code> to proceed.\n\n"
-        "💡 Also consider setting <code>SAVE_CAPTION = False</code> on Render, so newly indexed files "
-        "don't store captions either (prevents this from building up again)."
-    )
+            else:
+                cursor = coll.find({"caption": {"$nin": [None, ""]}}, {"caption": 1})
+                async for doc in cursor:
+                    raw = doc.get("caption") or ""
+                    cleaned = strip_channel_tags(raw)
+                    if cleaned != raw:
+                        await coll.update_one({"_id": doc["_id"]}, {"$set": {"caption": cleaned or None}})
+                        total_updated += 1
+            logger.info(f"[STRIP_CAPTIONS] {label}: {total_updated}")
+        await status.edit_text(
+            f"✅ Caption clean ho gaya.\nUpdated: <code>{total_updated:,}</code>\n\n"
+            f"{'Captions delete ho gayi.' if wipe else 'Links aur @username caption se hata diye.'}\n"
+            f"Poori caption mitani ho to: <code>/strip_captions delete</code>"
+        )
+    except Exception as e:
+        logger.exception("[STRIP_CAPTIONS] Failed")
+        await status.edit_text(f"❌ Failed: <code>{e}</code>")
