@@ -486,7 +486,10 @@ async def recover_names_from_channels(limit_per_chat=8000):
     return {"scanned": scanned, "fixed": fixed, "skipped": skipped, "samples": samples, "error": None}
 
 
-async def strip_channel_captions(chat_id, limit=12000, wipe=False, bot_client=None, progress_cb=None):
+STRIP_CONTROL = {}  # chat_id -> "running" | "stop"
+
+
+async def strip_channel_captions(chat_id, limit=None, wipe=False, bot_client=None, progress_cb=None, resume=True):
     """Edit captions already posted in ONE channel.
 
     wipe=False → links/@username hatao, title rakho
@@ -503,6 +506,20 @@ async def strip_channel_captions(chat_id, limit=12000, wipe=False, bot_client=No
     skipped = 0
     failed = 0
     seen_media = 0
+    last_seen_id = 0
+    offset_id = 0
+    STRIP_CONTROL[chat_id] = "running"
+    if resume:
+        try:
+            saved = await db.misc.find_one({"_id": f"strip_{chat_id}"})
+            if saved:
+                offset_id = int(saved.get("last_message_id") or 0)
+                scanned = int(saved.get("scanned") or 0)
+                edited = int(saved.get("edited") or 0)
+                skipped = int(saved.get("skipped") or 0)
+                failed = int(saved.get("failed") or 0)
+        except Exception:
+            pass
     JOBS["strip_captions"] = {
         "state": "running",
         "chat_id": chat_id,
@@ -540,9 +557,13 @@ async def strip_channel_captions(chat_id, limit=12000, wipe=False, bot_client=No
         return False
 
     try:
-        async for message in reader.get_chat_history(chat_id):
+        history_kw = {"offset_id": offset_id} if offset_id else {}
+        async for message in reader.get_chat_history(chat_id, **history_kw):
+            if STRIP_CONTROL.get(chat_id) == "stop":
+                break
             scanned += 1
-            if seen_media >= limit:
+            last_seen_id = message.id
+            if limit and seen_media >= limit:
                 break
             media = message.video or message.document
             if not media:
@@ -568,7 +589,7 @@ async def strip_channel_captions(chat_id, limit=12000, wipe=False, bot_client=No
                 await asyncio.sleep(0.35)
             else:
                 failed += 1
-            if seen_media % 15 == 0:
+            if seen_media % 15 == 0 or scanned % 100 == 0:
                 JOBS["strip_captions"] = {
                     "state": "running",
                     "chat_id": chat_id,
@@ -576,11 +597,27 @@ async def strip_channel_captions(chat_id, limit=12000, wipe=False, bot_client=No
                     "edited": edited,
                     "skipped": skipped,
                     "failed": failed,
+                    "last_message_id": last_seen_id,
                     "last_error": last_err,
                 }
+                try:
+                    await db.misc.update_one(
+                        {"_id": f"strip_{chat_id}"},
+                        {"$set": {
+                            "last_message_id": last_seen_id,
+                            "scanned": scanned,
+                            "edited": edited,
+                            "skipped": skipped,
+                            "failed": failed,
+                            "status": "running",
+                        }},
+                        upsert=True,
+                    )
+                except Exception:
+                    pass
                 if progress_cb:
                     try:
-                        await progress_cb(scanned, edited, skipped, failed)
+                        await progress_cb(scanned, edited, skipped, failed, last_seen_id)
                     except Exception:
                         pass
     except Exception as e:
@@ -601,13 +638,31 @@ async def strip_channel_captions(chat_id, limit=12000, wipe=False, bot_client=No
             "error": str(e),
             "last_error": last_err,
         }
+    done_state = "stopped" if STRIP_CONTROL.get(chat_id) == "stop" else "done"
+    STRIP_CONTROL.pop(chat_id, None)
+    try:
+        await db.misc.update_one(
+            {"_id": f"strip_{chat_id}"},
+            {"$set": {
+                "last_message_id": last_seen_id,
+                "scanned": scanned,
+                "edited": edited,
+                "skipped": skipped,
+                "failed": failed,
+                "status": done_state,
+            }},
+            upsert=True,
+        )
+    except Exception:
+        pass
     JOBS["strip_captions"] = {
-        "state": "done",
+        "state": done_state,
         "chat_id": chat_id,
         "scanned": scanned,
         "edited": edited,
         "skipped": skipped,
         "failed": failed,
+        "last_message_id": last_seen_id,
         "last_error": last_err,
     }
     return {
