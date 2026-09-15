@@ -1850,6 +1850,7 @@ async def clean_channel_captions_cmd(client, message):
 async def strip_captions_cmd(client, message):
     args = message.command[1:]
     wipe = any(a.lower() in {"delete", "confirm", "yes", "wipe", "clear"} for a in args)
+    restart = any(a.lower() in {"restart", "reset", "new"} for a in args)
     chat_id = None
     for a in args:
         if a.lstrip("-").isdigit():
@@ -1857,6 +1858,11 @@ async def strip_captions_cmd(client, message):
             break
     if chat_id is None:
         chat_id = USERBOT_BACKUP_CHANNEL
+    if args and args[0].lower() == "stop":
+        from userbot_index import STRIP_CONTROL
+        if chat_id:
+            STRIP_CONTROL[chat_id] = "stop"
+        return await message.reply_text(f"🛑 Strip stop: <code>{chat_id}</code>")
     if not chat_id:
         return await message.reply_text(
             "Channel id do:\n<code>/strip_captions -1001234567890</code>\n\n"
@@ -1872,13 +1878,16 @@ async def strip_captions_cmd(client, message):
         f"/restart mat dena."
     )
 
-    async def progress(scanned, edited, skipped, failed):
+    async def progress(scanned, edited, skipped, failed, last_id=0):
         try:
             await status.edit_text(
-                f"🧹 Chal raha hai...\n"
+                f"🧹 Poori channel scan chal rahi hai (limit nahi)...\n"
                 f"Channel: <code>{chat_id}</code>\n"
+                f"Last msg: <code>{last_id}</code>\n"
                 f"Dekhe: <code>{scanned}</code> | Edit: <code>{edited}</code> | "
-                f"Skip: <code>{skipped}</code> | Fail: <code>{failed}</code>"
+                f"Skip: <code>{skipped}</code> | Fail: <code>{failed}</code>\n\n"
+                f"/jobstatus se bhi dekh sakte ho. Rokna ho to:\n"
+                f"<code>/strip_captions stop {chat_id}</code>"
             )
         except Exception:
             pass
@@ -1891,6 +1900,7 @@ async def strip_captions_cmd(client, message):
                 wipe=wipe,
                 bot_client=client,
                 progress_cb=progress,
+                resume=not restart,
             )
         except Exception as e:
             return await status.edit_text(f"❌ Fail: <code>{e}</code>")
