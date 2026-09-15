@@ -119,8 +119,16 @@ async def set_skip_number(bot, message):
             skip = int(skip)
         except:
             return await message.reply("Skip number should be an integer.")
-        await message.reply(f"Successfully set SKIP number as {skip}")
         temp.CURRENT = int(skip)
+        try:
+            from database.users_chats_db import db
+            await db.misc.update_one({"_id": "index_skip"}, {"$set": {"value": int(skip)}}, upsert=True)
+        except Exception:
+            pass
+        await message.reply(
+            f"✅ SKIP abhi apply ho gaya: <code>{skip}</code>\n"
+            f"Indexing isi message id se aage jump karega."
+        )
     else:
         await message.reply("Give me a skip number")
 
@@ -165,6 +173,9 @@ async def index_files_to_db(lst_msg_id, chat, msg, bot):
                 if temp.CANCEL:
                     break
                 batch_start = time.time()
+                if temp.CURRENT and temp.CURRENT > current:
+                    current = temp.CURRENT
+                    logger.info(f"[INDEX] Skip jumped immediately to {current}")
                 start_id = current + 1
                 end_id = min(current + BATCH_SIZE, lst_msg_id)
                 message_ids = range(start_id, end_id + 1)

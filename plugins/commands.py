@@ -1418,6 +1418,63 @@ async def reset_trial(client, message):
         await message.reply_text(f"An error occurred: {e}")
 
 
+@Client.on_message(filters.command(['repairnames', 'fixnames', 'fixmkv']) & filters.user(ADMINS))
+async def repair_names_cmd(client, message):
+    status = await message.reply_text(
+        "🔧 Purani <code>.mkv</code> / empty naam wali files scan ho rahi hain...\n"
+        "Jahan caption mein title bacha hoga wahan naam recover hoga."
+    )
+    try:
+        from database.ia_filterdb import repair_broken_filenames
+        result = await repair_broken_filenames()
+    except Exception as e:
+        return await status.edit_text(f"❌ Repair fail: <code>{e}</code>")
+    extra = ""
+    if result["samples_fixed"]:
+        extra += "\n\n✅ Recovered examples:\n" + "\n".join(
+            f"• <code>{n}</code>" for n in result["samples_fixed"]
+        )
+    if result["unrecoverable"]:
+        extra += (
+            "\n\n⚠️ Jo recover nahi hui unka original title DB mein hi nahi hai. "
+            "Unhe source channel se dubara index karna padega."
+        )
+    await status.edit_text(
+        f"✅ Repair complete\n"
+        f"Scanned broken names: <code>{result['scanned']}</code>\n"
+        f"Fixed: <code>{result['fixed']}</code>\n"
+        f"Could not recover: <code>{result['unrecoverable']}</code>"
+        + extra
+    )
+
+
+@Client.on_message(filters.command('userbot_skip') & filters.user(ADMINS))
+async def userbot_skip_cmd(client, message):
+    from userbot_index import SKIP_TO, _save_progress, _get_progress
+    if len(message.command) < 3:
+        return await message.reply_text(
+            "Usage: <code>/userbot_skip -1001234567890 123456</code>\n"
+            "Pehla id channel ka, doosra message id jahan se aage skip karna hai.\n"
+            "Ye turant apply hota hai — bot restart ki zaroorat nahi."
+        )
+    try:
+        chat_id = int(message.command[1])
+    except ValueError:
+        chat_id = message.command[1]
+    try:
+        jump_id = int(message.command[2])
+    except ValueError:
+        return await message.reply_text("❌ Message id number hona chahiye.")
+    SKIP_TO[chat_id] = jump_id
+    await _save_progress(chat_id, last_message_id=jump_id, status="running")
+    p = await _get_progress(chat_id)
+    await message.reply_text(
+        f"✅ Skip apply ho gaya.\nChannel: <code>{chat_id}</code>\n"
+        f"Ab yahan se continue: <code>{jump_id}</code>\n"
+        f"Saved status: <code>{p.get('status')}</code>"
+    )
+
+
 @Client.on_message(filters.command('userbot_pause') & filters.user(ADMINS))
 async def userbot_pause_cmd(client, message):
     from userbot_index import BACKFILL_CONTROL
