@@ -18,7 +18,7 @@ from pyrogram.errors import FloodWait, ChatAdminRequired, UserNotParticipant
 from database.ia_filterdb import Media, Media2, get_file_details, unpack_new_file_id, get_bad_files
 from database.users_chats_db import db
 from info import *
-from utils import get_settings, save_group_settings, is_subscribed, is_req_subscribed, get_size, get_shortlink, is_check_admin, temp, get_readable_time, get_time, generate_settings_text, log_error, clean_filename, format_file_caption
+from utils import get_settings, save_group_settings, is_subscribed, is_req_subscribed, get_size, get_shortlink, is_check_admin, temp, get_readable_time, get_time, generate_settings_text, log_error, clean_filename, format_file_caption, strip_channel_tags
 import time
 
 
@@ -349,7 +349,7 @@ async def start(client, message):
                         f_caption = format_file_caption(DREAMX_CAPTION, title, size, f_caption)
                     except Exception as e:
                         logger.exception(e)
-                        f_caption = f_caption
+                        f_caption = strip_channel_tags(f_caption or title) or title
                 if f_caption is None:
                     f_caption = f"{clean_filename(files1.file_name)}"
                 
@@ -462,7 +462,7 @@ async def start(client, message):
             f_caption = format_file_caption(DREAMX_CAPTION, title, size, f_caption)
         except Exception as e:
             logger.exception(e)
-            f_caption = f_caption
+            f_caption = strip_channel_tags(f_caption or title) or title
 
     if f_caption is None:
         f_caption = clean_filename(files.file_name)
