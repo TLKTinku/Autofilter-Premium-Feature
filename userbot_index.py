@@ -210,83 +210,113 @@ async def _join_target(target: str):
     return None
 
 
+async def enable_live_forward(chat_id):
+    chat = await _join_target(str(chat_id))
+    if not chat:
+        raise RuntimeError("Channel join/access fail")
+    return chat.id
+
+
+async def disable_live_forward(chat_id):
+    INDEXED_CHAT_IDS.discard(int(chat_id))
+    await db.misc.update_one(
+        {"_id": "userbot_live_chats"},
+        {"$pull": {"chat_ids": int(chat_id)}},
+        upsert=True,
+    )
+
+
+async def _newest_message_id(chat_id):
+    async for message in userbot.get_chat_history(chat_id, limit=1):
+        return message.id
+    return 0
+
+
 async def _backfill_pass(chat_id, progress):
-    """One continuous pass over the channel history, starting from saved progress.
-    Raises on unexpected errors so the caller can decide whether to auto-retry."""
+    """Oldest → newest. last_message_id se aage badhta hai. Nayi files live catch karega."""
     scanned = progress.get("scanned", 0)
     forwarded_count = progress.get("forwarded", 0)
     skipped_count = progress.get("skipped", 0)
     dup_count = progress.get("duplicates", 0)
-    offset_id = progress.get("last_message_id", 0)
-    last_seen_id = offset_id
+    last_seen_id = int(progress.get("last_message_id", 0) or 0)
+    cursor = last_seen_id + 1
+    if cursor < 1:
+        cursor = 1
+    newest = await _newest_message_id(chat_id)
+    batch = 80
 
-    async for message in userbot.get_chat_history(chat_id, offset_id=offset_id):
+    while cursor <= newest:
+        jump_to = SKIP_TO.pop(chat_id, None)
+        if jump_to is not None:
+            cursor = max(1, int(jump_to))
+            last_seen_id = cursor - 1
+            await _save_progress(
+                chat_id, last_message_id=last_seen_id, scanned=scanned,
+                forwarded=forwarded_count, skipped=skipped_count,
+                duplicates=dup_count, status="running",
+            )
+            newest = await _newest_message_id(chat_id)
+            continue
+
         while BACKFILL_CONTROL.get(chat_id) == "paused":
             await asyncio.sleep(2)
 
         if BACKFILL_CONTROL.get(chat_id) == "stop":
             await _save_progress(
                 chat_id, last_message_id=last_seen_id, scanned=scanned,
-                forwarded=forwarded_count, skipped=skipped_count, duplicates=dup_count, status="stopped"
-            )
-            logger.info(f"[USERBOT-BACKFILL] Stopped by user at message_id={last_seen_id}.")
-            BACKFILL_CONTROL.pop(chat_id, None)
-            return scanned, forwarded_count, skipped_count, True  # True = fully stopped by user
-
-        jump_to = SKIP_TO.pop(chat_id, None)
-        if jump_to is not None:
-            last_seen_id = int(jump_to)
-            await _save_progress(
-                chat_id, last_message_id=last_seen_id, scanned=scanned,
                 forwarded=forwarded_count, skipped=skipped_count,
-                duplicates=dup_count, status="running"
+                duplicates=dup_count, status="stopped",
             )
-            logger.info(f"[USERBOT-BACKFILL] Skip applied immediately → message_id={last_seen_id}")
-            return await _backfill_pass(chat_id, await _get_progress(chat_id))
+            BACKFILL_CONTROL.pop(chat_id, None)
+            return scanned, forwarded_count, skipped_count, True
 
-        last_seen_id = message.id
-        scanned += 1
-        media = message.video or message.document
-
-        if media:
+        ids = list(range(cursor, min(cursor + batch, newest + 1)))
+        try:
+            messages = await userbot.get_messages(chat_id, ids)
+        except FloodWait as e:
+            await asyncio.sleep(int(getattr(e, "value", 1)) + 1)
+            continue
+        if not isinstance(messages, list):
+            messages = [messages]
+        for message in messages:
+            if not message or getattr(message, "empty", False):
+                last_seen_id = max(last_seen_id, getattr(message, "id", cursor))
+                continue
+            last_seen_id = message.id
+            scanned += 1
+            media = message.video or message.document
+            if not media:
+                continue
             if _is_short_video(media):
                 skipped_count += 1
-                logger.info(
-                    f"[USERBOT-BACKFILL] Skipped short video (<4 min): "
-                    f"{getattr(media, 'file_name', '?')} | duration={getattr(media, 'duration', '?')}s"
-                )
-                await _save_progress(
-                    chat_id, last_message_id=last_seen_id, scanned=scanned,
-                    forwarded=forwarded_count, skipped=skipped_count,
-                    duplicates=dup_count, status="running"
-                )
                 continue
-
-            is_dup = await _already_have_exact_copy(media.file_name, media.file_size)
-            if is_dup:
+            if await _already_have_exact_copy(media.file_name, media.file_size):
                 dup_count += 1
-            else:
-                try:
-                    await _safe_copy(message, caption=_clean_caption(message.caption), label="BACKFILL")
-                    forwarded_count += 1
-                except Exception:
-                    skipped_count += 1
-                    logger.exception(f"[USERBOT-BACKFILL] Failed to forward message {message.id}")
-
-        # Save progress after EVERY message — minimizes duplicate re-processing on any crash/restart
+                continue
+            try:
+                await _safe_copy(message, caption=_clean_caption(message.caption), label="BACKFILL")
+                forwarded_count += 1
+            except Exception:
+                skipped_count += 1
+                logger.exception(f"[USERBOT-BACKFILL] Failed to forward message {message.id}")
+        cursor = last_seen_id + 1
         await _save_progress(
             chat_id, last_message_id=last_seen_id, scanned=scanned,
-            forwarded=forwarded_count, skipped=skipped_count, duplicates=dup_count, status="running"
+            forwarded=forwarded_count, skipped=skipped_count,
+            duplicates=dup_count, status="running",
         )
         if scanned % 200 == 0:
             logger.info(
-                f"[USERBOT-BACKFILL] message_id={last_seen_id} | scanned={scanned} forwarded={forwarded_count} "
-                f"duplicates_skipped={dup_count} failed={skipped_count}"
+                f"[USERBOT-BACKFILL] oldest→new id={last_seen_id}/{newest} scanned={scanned} "
+                f"forwarded={forwarded_count} dups={dup_count}"
             )
+        if cursor > newest:
+            newest = await _newest_message_id(chat_id)
 
     await _save_progress(
         chat_id, last_message_id=last_seen_id, scanned=scanned,
-        forwarded=forwarded_count, skipped=skipped_count, duplicates=dup_count, status="done"
+        forwarded=forwarded_count, skipped=skipped_count,
+        duplicates=dup_count, status="done",
     )
     return scanned, forwarded_count, skipped_count, False
 
@@ -306,14 +336,25 @@ async def backfill_channel(chat_id, resume=True, start_from=None):
     if not USERBOT_BACKUP_CHANNEL:
         raise RuntimeError("USERBOT_BACKUP_CHANNEL is not set on Render.")
 
-    INDEXED_CHAT_IDS.add(chat_id)  # safety net: make sure live-indexing also covers this channel
+    INDEXED_CHAT_IDS.add(chat_id)
+    try:
+        await db.misc.update_one(
+            {"_id": "userbot_live_chats"},
+            {"$addToSet": {"chat_ids": chat_id}},
+            upsert=True,
+        )
+    except Exception:
+        pass
     BACKFILL_CONTROL[chat_id] = "running"
     retry_delay = 5
     first_pass = True
 
     while True:
         if first_pass and start_from is not None:
-            progress = {"last_message_id": start_from, "scanned": 0, "forwarded": 0, "skipped": 0, "duplicates": 0}
+            progress = {
+                "last_message_id": max(0, int(start_from) - 1),
+                "scanned": 0, "forwarded": 0, "skipped": 0, "duplicates": 0,
+            }
         else:
             progress = await _get_progress(chat_id) if resume else {}
         first_pass = False
