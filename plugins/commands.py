@@ -1576,9 +1576,12 @@ async def userbot_stop_cmd(client, message):
     )
 
 
-@Client.on_message(filters.command('userbot_backfill') & filters.user(ADMINS))
+@Client.on_message(filters.command('userbot_backfill'))
 async def userbot_backfill_cmd(client, message):
     from userbot_index import userbot, backfill_channel, INDEXED_CHAT_IDS
+    uid = message.from_user.id if message.from_user else 0
+    if uid not in ADMINS and str(uid) not in {str(a) for a in ADMINS}:
+        return await message.reply_text(f"Sirf admin. Teri ID: <code>{uid}</code>")
     if not userbot or not userbot.is_connected:
         return await message.reply_text(
             "❌ Userbot is not running. Set USER_SESSION, USERBOT_CHANNELS and USERBOT_BACKUP_CHANNEL on Render first, then redeploy."
@@ -1626,7 +1629,7 @@ async def userbot_backfill_cmd(client, message):
     client.loop.create_task(_run())
 
 
-@Client.on_message(filters.command(['live_on', 'liveon', 'live_start']) & filters.user(ADMINS))
+@Client.on_message(filters.command(['live_on', 'liveon', 'live_start']))
 async def live_on_cmd(client, message):
     from userbot_index import enable_live_forward, INDEXED_CHAT_IDS
     if len(message.command) < 2:
@@ -1646,26 +1649,30 @@ async def live_on_cmd(client, message):
     )
 
 
-@Client.on_message(filters.command(['live_off', 'liveoff', 'live_stop']) & filters.user(ADMINS))
+@Client.on_message(filters.command(['live_off', 'liveoff', 'live_stop']))
 async def live_off_cmd(client, message):
-    from userbot_index import disable_live_forward, INDEXED_CHAT_IDS
-    if len(message.command) < 2:
-        return await message.reply_text(
-            "Usage: <code>/live_off -1001234567890</code>\n"
-            f"Abhi on: <code>{', '.join(str(c) for c in INDEXED_CHAT_IDS) or 'none'}</code>"
-        )
+    from userbot_index import disable_live_forward, disable_all_live_forward, INDEXED_CHAT_IDS
+    arg = message.command[1] if len(message.command) > 1 else "all"
     try:
-        chat_id = int(message.command[1])
-    except ValueError:
-        return await message.reply_text("❌ Channel id number hona chahiye.")
-    await disable_live_forward(chat_id)
-    await message.reply_text(
-        f"🔴 Live forward OFF\nChannel: <code>{chat_id}</code>\n"
-        f"Wapas: <code>/live_on {chat_id}</code>"
-    )
+        if arg.lower() == "all":
+            ids = await disable_all_live_forward()
+            return await message.reply_text(
+                f"🔴 Live forward OFF (saari)\n"
+                f"Band: <code>{', '.join(str(i) for i in ids) or 'none'}</code>\n"
+                f"Wapas: <code>/live_on -100ID</code>"
+            )
+        chat_id = int(arg)
+        await disable_live_forward(chat_id)
+        await message.reply_text(
+            f"🔴 Live forward OFF\nChannel: <code>{chat_id}</code>\n"
+            f"Abhi on: <code>{', '.join(str(c) for c in INDEXED_CHAT_IDS) or 'none'}</code>\n"
+            f"Wapas: <code>/live_on {chat_id}</code>"
+        )
+    except Exception as e:
+        await message.reply_text(f"❌ Live off fail: <code>{e}</code>")
 
 
-@Client.on_message(filters.command(['userbot_status', 'live_status']) & filters.user(ADMINS))
+@Client.on_message(filters.command(['userbot_status', 'live_status']))
 async def userbot_status_cmd(client, message):
     from userbot_index import _get_progress, userbot, INDEXED_CHAT_IDS, BACKFILL_CONTROL, USERBOT_BACKUP_CHANNEL
     ub_on = bool(userbot and userbot.is_connected)
