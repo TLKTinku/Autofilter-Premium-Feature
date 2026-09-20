@@ -210,20 +210,58 @@ async def _join_target(target: str):
     return None
 
 
+async def _is_live_disabled(chat_id):
+    try:
+        doc = await db.misc.find_one({"_id": "userbot_live_disabled"})
+        blocked = set((doc or {}).get("chat_ids") or [])
+        return chat_id in blocked or str(chat_id) in blocked
+    except Exception:
+        return False
+
+
 async def enable_live_forward(chat_id):
+    chat_id = int(chat_id)
+    await db.misc.update_one(
+        {"_id": "userbot_live_disabled"},
+        {"$pull": {"chat_ids": {"$in": [chat_id, str(chat_id)]}}},
+        upsert=True,
+    )
     chat = await _join_target(str(chat_id))
     if not chat:
-        raise RuntimeError("Channel join/access fail")
+        raise RuntimeError("Channel join/access fail — userbot us channel pe nahi ja saka")
     return chat.id
 
 
 async def disable_live_forward(chat_id):
-    INDEXED_CHAT_IDS.discard(int(chat_id))
+    chat_id = int(chat_id)
+    INDEXED_CHAT_IDS.discard(chat_id)
     await db.misc.update_one(
         {"_id": "userbot_live_chats"},
-        {"$pull": {"chat_ids": int(chat_id)}},
+        {"$pull": {"chat_ids": {"$in": [chat_id, str(chat_id)]}}},
         upsert=True,
     )
+    await db.misc.update_one(
+        {"_id": "userbot_live_disabled"},
+        {"$addToSet": {"chat_ids": chat_id}},
+        upsert=True,
+    )
+
+
+async def disable_all_live_forward():
+    ids = list(INDEXED_CHAT_IDS)
+    INDEXED_CHAT_IDS.clear()
+    await db.misc.update_one(
+        {"_id": "userbot_live_chats"},
+        {"$set": {"chat_ids": []}},
+        upsert=True,
+    )
+    if ids:
+        await db.misc.update_one(
+            {"_id": "userbot_live_disabled"},
+            {"$addToSet": {"chat_ids": {"$each": ids}}},
+            upsert=True,
+        )
+    return ids
 
 
 async def _newest_message_id(chat_id):
@@ -339,15 +377,16 @@ async def backfill_channel(chat_id, resume=True, start_from=None):
     if not USERBOT_BACKUP_CHANNEL:
         raise RuntimeError("USERBOT_BACKUP_CHANNEL is not set on Render.")
 
-    INDEXED_CHAT_IDS.add(chat_id)
-    try:
-        await db.misc.update_one(
-            {"_id": "userbot_live_chats"},
-            {"$addToSet": {"chat_ids": chat_id}},
-            upsert=True,
-        )
-    except Exception:
-        pass
+    if not await _is_live_disabled(chat_id):
+        INDEXED_CHAT_IDS.add(chat_id)
+        try:
+            await db.misc.update_one(
+                {"_id": "userbot_live_chats"},
+                {"$addToSet": {"chat_ids": chat_id}},
+                upsert=True,
+            )
+        except Exception:
+            pass
     BACKFILL_CONTROL[chat_id] = "running"
     retry_delay = 5
     first_pass = True
@@ -410,24 +449,26 @@ async def start_userbot():
         logger.warning(f"[USERBOT] Could not ensure duplicate-check index: {e}")
 
     for target in USERBOT_CHANNELS:
-        await _join_target(target)
+        chat = await _join_target(target)
+        # env channel join = access only. Live tabhi ON jab disabled na ho.
+        if chat and await _is_live_disabled(chat.id):
+            INDEXED_CHAT_IDS.discard(chat.id)
+            logger.info(f"[USERBOT] Live kept OFF for {chat.id} (user disabled)")
 
-    # Restore live-forward channels after restart (in-memory set is empty on boot)
     try:
         saved = await db.misc.find_one({"_id": "userbot_live_chats"})
         for cid in (saved or {}).get("chat_ids", []):
-            if cid not in INDEXED_CHAT_IDS:
-                chat = await _join_target(str(cid))
-                if chat:
-                    logger.info(f"[USERBOT] Restored live forward for {cid}")
-        async for doc in db.misc.find({"_id": {"$regex": "^backfill_"}}):
-            chat_id_str = doc["_id"].replace("backfill_", "")
             try:
-                cid = int(chat_id_str)
-            except ValueError:
-                cid = chat_id_str
-            if cid not in INDEXED_CHAT_IDS:
-                await _join_target(str(cid))
+                cid_i = int(cid)
+            except (TypeError, ValueError):
+                continue
+            if await _is_live_disabled(cid_i):
+                INDEXED_CHAT_IDS.discard(cid_i)
+                continue
+            if cid_i not in INDEXED_CHAT_IDS:
+                chat = await _join_target(str(cid_i))
+                if chat:
+                    logger.info(f"[USERBOT] Restored live forward for {cid_i}")
     except Exception as e:
         logger.error(f"[USERBOT] Failed to restore live-forward chats: {e}")
 
