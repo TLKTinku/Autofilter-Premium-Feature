@@ -1665,25 +1665,34 @@ async def live_off_cmd(client, message):
     )
 
 
-@Client.on_message(filters.command('userbot_status') & filters.user(ADMINS))
+@Client.on_message(filters.command(['userbot_status', 'live_status']) & filters.user(ADMINS))
 async def userbot_status_cmd(client, message):
-    from userbot_index import _get_progress
+    from userbot_index import _get_progress, userbot, INDEXED_CHAT_IDS, BACKFILL_CONTROL, USERBOT_BACKUP_CHANNEL
+    ub_on = bool(userbot and userbot.is_connected)
+    lines = [
+        f"Userbot: <code>{'ON' if ub_on else 'OFF'}</code>",
+        f"Backup: <code>{USERBOT_BACKUP_CHANNEL}</code>",
+        f"Live ON: <code>{', '.join(str(c) for c in INDEXED_CHAT_IDS) or 'none'}</code>",
+    ]
     if len(message.command) < 2:
-        return await message.reply_text("Usage: <code>/userbot_status -1001234567890</code>")
+        lines.append("\nChannel status: <code>/userbot_status -100ID</code>")
+        return await message.reply_text("\n".join(lines))
     try:
         chat_id = int(message.command[1])
     except ValueError:
         chat_id = message.command[1]
     p = await _get_progress(chat_id)
-    await message.reply_text(
-        f"📊 <b>Backfill status for</b> <code>{chat_id}</code>\n\n"
-        f"Status: <code>{p.get('status', 'not_started')}</code>\n"
-        f"Currently at message id: <code>{p.get('last_message_id', 0)}</code>\n"
-        f"Scanned: <code>{p.get('scanned', 0)}</code>\n"
-        f"Forwarded to backup channel: <code>{p.get('forwarded', 0)}</code>\n"
-        f"Duplicates skipped (same name+size): <code>{p.get('duplicates', 0)}</code>\n"
-        f"Failed: <code>{p.get('skipped', 0)}</code>"
+    lines.append(
+        f"\nBackfill <code>{chat_id}</code>\n"
+        f"Status: <code>{p.get('status', 'not_started')}</code> | "
+        f"ctrl: <code>{BACKFILL_CONTROL.get(chat_id, '-')}</code>\n"
+        f"At id: <code>{p.get('last_message_id', 0)}</code>\n"
+        f"Scanned: <code>{p.get('scanned', 0)}</code> | "
+        f"Forwarded: <code>{p.get('forwarded', 0)}</code>\n"
+        f"Dups: <code>{p.get('duplicates', 0)}</code> | "
+        f"Fail: <code>{p.get('skipped', 0)}</code>"
     )
+    await message.reply_text("\n".join(lines))
 
 
 @Client.on_message(filters.command('db_stats') & filters.user(ADMINS))
