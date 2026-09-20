@@ -278,11 +278,13 @@ async def _backfill_pass(chat_id, progress):
             continue
         if not isinstance(messages, list):
             messages = [messages]
+        batch_end = ids[-1]
         for message in messages:
+            mid = getattr(message, "id", None) if message else None
+            if mid:
+                last_seen_id = max(last_seen_id, mid)
             if not message or getattr(message, "empty", False):
-                last_seen_id = max(last_seen_id, getattr(message, "id", cursor))
                 continue
-            last_seen_id = message.id
             scanned += 1
             media = message.video or message.document
             if not media:
@@ -299,11 +301,12 @@ async def _backfill_pass(chat_id, progress):
             except Exception:
                 skipped_count += 1
                 logger.exception(f"[USERBOT-BACKFILL] Failed to forward message {message.id}")
-        cursor = last_seen_id + 1
+        cursor = batch_end + 1
+        last_seen_id = max(last_seen_id, batch_end)
         await _save_progress(
             chat_id, last_message_id=last_seen_id, scanned=scanned,
             forwarded=forwarded_count, skipped=skipped_count,
-            duplicates=dup_count, status="running",
+            duplicates=dup_count, status="running", direction="oldest_first",
         )
         if scanned % 200 == 0:
             logger.info(
@@ -354,9 +357,20 @@ async def backfill_channel(chat_id, resume=True, start_from=None):
             progress = {
                 "last_message_id": max(0, int(start_from) - 1),
                 "scanned": 0, "forwarded": 0, "skipped": 0, "duplicates": 0,
+                "direction": "oldest_first",
             }
+        elif first_pass:
+            saved = await _get_progress(chat_id) if resume else {}
+            if saved.get("direction") == "oldest_first":
+                progress = saved
+            else:
+                # purana newest-first progress ignore — warna turant done ho jaata
+                progress = {
+                    "last_message_id": 0, "scanned": 0, "forwarded": 0,
+                    "skipped": 0, "duplicates": 0, "direction": "oldest_first",
+                }
         else:
-            progress = await _get_progress(chat_id) if resume else {}
+            progress = await _get_progress(chat_id)
         first_pass = False
         try:
             scanned, forwarded, skipped, stopped = await _backfill_pass(chat_id, progress)
