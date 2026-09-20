@@ -1585,13 +1585,12 @@ async def userbot_backfill_cmd(client, message):
         )
     if len(message.command) < 2:
         return await message.reply_text(
-            "Usage:\n<code>/userbot_backfill -1001234567890</code>\n"
-            "Or to re-scan from the top (catches missed files, skips already-processed ones fast):\n"
-            "<code>/userbot_backfill -1001234567890 restart</code>\n"
-            "Or to jump straight to a specific point (skip everything newer than this message id):\n"
-            "<code>/userbot_backfill -1001234567890 from:123456</code>\n\n"
-            f"Channels the userbot currently has access to: <code>{', '.join(str(c) for c in INDEXED_CHAT_IDS) or 'none yet'}</code>\n\n"
-            "Check progress anytime with <code>/userbot_status -1001234567890</code>"
+            "Usage:\n"
+            "<code>/userbot_backfill -1001234567890</code>\n"
+            "<code>/userbot_backfill -1001234567890 15000</code>\n\n"
+            "15000 = pehli 15000 skip, phir oldest se nayi taraf.\n"
+            "Nayi upload live catch hongi.\n"
+            f"Live channels: <code>{', '.join(str(c) for c in INDEXED_CHAT_IDS) or 'none'}</code>"
         )
     try:
         chat_id = int(message.command[1])
@@ -1600,23 +1599,15 @@ async def userbot_backfill_cmd(client, message):
 
     restart_from_top = len(message.command) > 2 and message.command[2].lower() == "restart"
     custom_start_id = None
-    if len(message.command) > 2 and message.command[2].lower().startswith("from:"):
-        try:
-            custom_start_id = int(message.command[2].split(":", 1)[1])
-        except ValueError:
-            return await message.reply_text("❌ Invalid format. Use: /userbot_backfill <id> from:123456")
+    if len(message.command) > 2 and message.command[2].lstrip("-").isdigit():
+        custom_start_id = int(message.command[2])
 
     status = await message.reply_text(
-        (f"⏳ Jumping straight to message id {custom_start_id} (skipping everything newer)...\n\n" if custom_start_id else
-         "⏳ Re-scanning from the TOP of the channel (catching up on anything missed)...\n\n" if restart_from_top else
-         "⏳ Starting/resuming full-history backfill... ") +
-        "files are being FORWARDED to your backup channel, "
-        "then auto-indexed from there. Already-processed files will be skipped almost instantly.\n\n"
-        "It's SAFE to restart the bot anytime — it will pick up from where it left off, not from scratch.\n\n"
-        f"⏸️ Pause: <code>/userbot_pause {chat_id}</code>\n"
-        f"▶️ Resume: <code>/userbot_resume {chat_id}</code>\n"
-        f"🛑 Stop: <code>/userbot_stop {chat_id}</code>\n"
-        f"📊 Status: <code>/userbot_status {chat_id}</code>"
+        (f"⏳ {custom_start_id} se start...\n" if custom_start_id else
+         "⏳ Upar se scan...\n" if restart_from_top else
+         "⏳ Resume / start...\n") +
+        f"Duplicate jaldi skip honge.\n"
+        f"/userbot_stop {chat_id}  |  /userbot_status {chat_id}"
     )
 
     async def _run():
@@ -1633,6 +1624,45 @@ async def userbot_backfill_cmd(client, message):
             await status.edit_text(f"❌ Backfill failed: {e}\n\nDon't worry, progress is saved — just run /userbot_backfill {chat_id} again to resume.")
 
     client.loop.create_task(_run())
+
+
+@Client.on_message(filters.command(['live_on', 'liveon', 'live_start']) & filters.user(ADMINS))
+async def live_on_cmd(client, message):
+    from userbot_index import enable_live_forward, INDEXED_CHAT_IDS
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: <code>/live_on -1001234567890</code>")
+    try:
+        chat_id = int(message.command[1])
+    except ValueError:
+        return await message.reply_text("❌ Channel id number hona chahiye.")
+    try:
+        cid = await enable_live_forward(chat_id)
+    except Exception as e:
+        return await message.reply_text(f"❌ Live start fail: <code>{e}</code>")
+    await message.reply_text(
+        f"🟢 Live forward ON\nChannel: <code>{cid}</code>\n"
+        f"Ab nayi files backup mein aayengi.\n"
+        f"Band: <code>/live_off {cid}</code>"
+    )
+
+
+@Client.on_message(filters.command(['live_off', 'liveoff', 'live_stop']) & filters.user(ADMINS))
+async def live_off_cmd(client, message):
+    from userbot_index import disable_live_forward, INDEXED_CHAT_IDS
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "Usage: <code>/live_off -1001234567890</code>\n"
+            f"Abhi on: <code>{', '.join(str(c) for c in INDEXED_CHAT_IDS) or 'none'}</code>"
+        )
+    try:
+        chat_id = int(message.command[1])
+    except ValueError:
+        return await message.reply_text("❌ Channel id number hona chahiye.")
+    await disable_live_forward(chat_id)
+    await message.reply_text(
+        f"🔴 Live forward OFF\nChannel: <code>{chat_id}</code>\n"
+        f"Wapas: <code>/live_on {chat_id}</code>"
+    )
 
 
 @Client.on_message(filters.command('userbot_status') & filters.user(ADMINS))
