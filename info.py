@@ -17,7 +17,7 @@ def is_enabled(value, default):
 # ============================
 # Bot Information Configuration
 # ============================
-SESSION = environ.get('SESSION', 'TLK_search')   # Session name for the bot
+SESSION = environ.get('SESSION', 'bot_session')   # Session name for the bot
 API_ID = int(environ.get('API_ID', '' )) # API ID from my.telegram.org
 API_HASH = environ.get('API_HASH', '' )  # API Hash from my.telegram.org
 USER_SESSION = environ.get('USER_SESSION', '')  # Pyrogram session string of your PERSONAL account, only needed to index channels you can't add the bot to
@@ -124,10 +124,10 @@ THREE_VERIFY_GAP = int(environ.get('THREE_VERIFY_GAP', "54000"))
 # ============================
 # Channel & Group Links Configuration
 # ============================
-GRP_LNK = environ.get('GRP_LNK', 'https://t.me/officialmymovies') # Group link for the bot
-BACKUP_CHANNEL_LINK = environ.get('BACKUP_CHANNEL_LINK', 'https://t.me/moviesinhindigroup') # Backup channel link, used for the clickable Name in file captions
-OWNER_LNK = environ.get('OWNER_LNK', 'https://t.me/TLK_Tinku_bro') # Owner link for the bot
-UPDATE_CHNL_LNK = environ.get('UPDATE_CHNL_LNK', 'https://t.me/moviesinhindigroup') # Update channel link for the bot
+GRP_LNK = environ.get('GRP_LNK', '') # Group link
+BACKUP_CHANNEL_LINK = environ.get('BACKUP_CHANNEL_LINK', '') # Backup channel link
+OWNER_LNK = environ.get('OWNER_LNK', '') # Owner telegram link
+UPDATE_CHNL_LNK = environ.get('UPDATE_CHNL_LNK', '') # Update channel link
 
 # ============================
 # User Configuration
@@ -164,8 +164,8 @@ PROTECT_CONTENT = is_enabled((environ.get('PROTECT_CONTENT', "False")), False) #
 PM_SEARCH = bool(environ.get('PM_SEARCH', True))  # PM Search On (True) / Off (False)
 EMOJI_MODE = bool(environ.get('EMOJI_MODE', False))  # Emoji status On (True) / Off (False)
 BUTTON_MODE = is_enabled((environ.get('BUTTON_MODE', "False")), False) # pm & Group button or link mode (True) / Off (False)
-STREAM_MODE = bool(environ.get('STREAM_MODE', False)) # Set Stream mode True or False
-PREMIUM_STREAM_MODE = bool(environ.get('PREMIUM_STREAM_MODE', False)) # Set Stream mode True or False only for premium users
+STREAM_MODE = is_enabled(environ.get('STREAM_MODE', 'False'), False) # True / False — "False" ab off hi maana jaayega
+PREMIUM_STREAM_MODE = is_enabled(environ.get('PREMIUM_STREAM_MODE', 'False'), False) # sirf premium users ke liye stream
 
 
 # ============================
