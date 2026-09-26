@@ -316,10 +316,6 @@ async def _backfill_pass(chat_id, progress):
             if _is_short_video(media):
                 skipped_count += 1
                 continue
-            if skip_left > 0:
-                skip_left -= 1
-                skipped_count += 1
-                continue
             if await _already_have_exact_copy(media.file_name, media.file_size):
                 dup_count += 1
                 continue
@@ -383,22 +379,21 @@ async def backfill_channel(chat_id, resume=True, start_from=None, skip_files=0):
     first_pass = True
 
     while True:
-        if first_pass and (start_from is not None or skip_files):
+        if first_pass and start_from is not None:
             progress = {
-                "last_message_id": max(0, int(start_from or 1) - 1) if start_from else 0,
+                "last_message_id": max(0, int(start_from) - 1),
                 "scanned": 0, "forwarded": 0, "skipped": 0, "duplicates": 0,
-                "direction": "oldest_first",
-                "skip_left": int(skip_files or 0),
+                "direction": "oldest_first", "skip_left": 0,
             }
         elif first_pass:
             saved = await _get_progress(chat_id) if resume else {}
-            if saved.get("direction") == "oldest_first" and not skip_files:
+            if saved.get("direction") == "oldest_first":
                 progress = saved
             else:
                 progress = {
                     "last_message_id": 0, "scanned": 0, "forwarded": 0,
                     "skipped": 0, "duplicates": 0, "direction": "oldest_first",
-                    "skip_left": int(skip_files or 0),
+                    "skip_left": 0,
                 }
         else:
             progress = await _get_progress(chat_id)
