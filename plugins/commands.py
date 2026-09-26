@@ -1530,8 +1530,8 @@ async def userbot_backfill_cmd(client, message):
         return await message.reply_text(
             "Shuru se forward (purani file pehle):\n"
             "<code>/autoforward -100ID</code>\n"
-            "Pehli 100000 files skip, phir aage:\n"
-            "<code>/autoforward -100ID 100000</code>\n"
+            "Id 150000 se seedha start:\n"
+            "<code>/autoforward -100ID 150000</code>\n"
             "Duplicate nahi jaayegi.\n"
             "Live nayi files: <code>/live_on -100ID</code>"
         )
@@ -1540,23 +1540,23 @@ async def userbot_backfill_cmd(client, message):
     except ValueError:
         return await message.reply_text("Channel id number do, jaise -100123...")
 
-    skip_files = 0
+    start_from = None
     if len(message.command) > 2 and message.command[2].isdigit():
-        skip_files = int(message.command[2])
+        start_from = int(message.command[2])
 
     status = await message.reply_text(
-        f"⏳ Shuru se forward\n"
-        f"Skip files: <code>{skip_files}</code>\n"
+        f"⏳ Forward start\n"
+        f"From message id: <code>{start_from or 1}</code>\n"
         f"Duplicate skip on.\n"
-        f"/userbot_stop {chat_id}  |  /live_status"
+        f"/stopforward {chat_id}"
     )
 
     async def _run():
         try:
             scanned, forwarded, skipped = await backfill_channel(
                 chat_id,
-                resume=skip_files == 0,
-                skip_files=skip_files,
+                resume=start_from is None,
+                start_from=start_from,
             )
             await status.edit_text(
                 f"✅ Forward complete\n"
@@ -1631,14 +1631,14 @@ async def userbot_status_cmd(client, message):
         chat_id = message.command[1]
     p = await _get_progress(chat_id)
     lines.append(
-        f"\nBackfill <code>{chat_id}</code>\n"
-        f"Status: <code>{p.get('status', 'not_started')}</code> | "
-        f"ctrl: <code>{BACKFILL_CONTROL.get(chat_id, '-')}</code>\n"
-        f"At id: <code>{p.get('last_message_id', 0)}</code>\n"
-        f"Scanned: <code>{p.get('scanned', 0)}</code> | "
+        f"\nForward <code>{chat_id}</code>\n"
+        f"Status: <code>{p.get('status', 'not_started')}</code>\n"
+        f"At message id: <code>{p.get('last_message_id', 0)}</code>\n"
+        f"Skip bachi: <code>{p.get('skip_left', 0)}</code>\n"
+        f"Scanned: <code>{p.get('scanned', 0)}</code>\n"
         f"Forwarded: <code>{p.get('forwarded', 0)}</code>\n"
-        f"Dups: <code>{p.get('duplicates', 0)}</code> | "
-        f"Fail: <code>{p.get('skipped', 0)}</code>"
+        f"Dups: <code>{p.get('duplicates', 0)}</code>\n"
+        f"Skip/short/fail: <code>{p.get('skipped', 0)}</code>"
     )
     await message.reply_text("\n".join(lines))
 
