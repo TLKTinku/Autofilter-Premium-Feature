@@ -181,29 +181,6 @@ async def _save_progress(chat_id, **fields):
     await db.misc.update_one({"_id": f"backfill_{chat_id}"}, {"$set": fields}, upsert=True)
 
 
-async def _resolve_already_joined(link: str):
-    """When we're already a participant, join_chat(link) fails and get_chat(link)
-    doesn't accept a raw URL. This resolves the actual chat via Telegram's own
-    'check invite' API, which works correctly even for existing members."""
-    m = re.search(r'(?:\+|joinchat/)([\w-]+)', link)
-    if not m:
-        return None
-    invite_hash = m.group(1)
-    try:
-        from pyrogram.raw.functions.messages import CheckChatInvite
-        result = await userbot.invoke(CheckChatInvite(hash=invite_hash))
-        raw_chat = getattr(result, "chat", None)
-        if raw_chat is None:
-            return None
-        chat_id = raw_chat.id
-        if not str(chat_id).startswith("-100"):
-            chat_id = int(f"-100{chat_id}")
-        return await userbot.get_chat(chat_id)
-    except Exception as e:
-        logger.error(f"[USERBOT] Could not resolve already-joined chat for {link}: {e}")
-        return None
-
-
 async def _join_target(target: str):
     """Join a channel by invite link, or just resolve it if given as an ID/username."""
     try:
@@ -211,10 +188,7 @@ async def _join_target(target: str):
             try:
                 chat = await userbot.join_chat(target)
             except UserAlreadyParticipant:
-                chat = await _resolve_already_joined(target)
-                if chat is None:
-                    logger.error(f"[USERBOT] Already a participant of {target} but couldn't resolve chat details.")
-                    return None
+                chat = await userbot.get_chat(target)
         else:
             chat_ref = int(target) if target.lstrip("-").isdigit() else target
             chat = await userbot.get_chat(chat_ref)
@@ -236,20 +210,58 @@ async def _join_target(target: str):
     return None
 
 
+async def _is_live_disabled(chat_id):
+    try:
+        doc = await db.misc.find_one({"_id": "userbot_live_disabled"})
+        blocked = set((doc or {}).get("chat_ids") or [])
+        return chat_id in blocked or str(chat_id) in blocked
+    except Exception:
+        return False
+
+
 async def enable_live_forward(chat_id):
+    chat_id = int(chat_id)
+    await db.misc.update_one(
+        {"_id": "userbot_live_disabled"},
+        {"$pull": {"chat_ids": {"$in": [chat_id, str(chat_id)]}}},
+        upsert=True,
+    )
     chat = await _join_target(str(chat_id))
     if not chat:
-        raise RuntimeError("Channel join/access fail")
+        raise RuntimeError("Channel join/access fail — userbot us channel pe nahi ja saka")
     return chat.id
 
 
 async def disable_live_forward(chat_id):
-    INDEXED_CHAT_IDS.discard(int(chat_id))
+    chat_id = int(chat_id)
+    INDEXED_CHAT_IDS.discard(chat_id)
     await db.misc.update_one(
         {"_id": "userbot_live_chats"},
-        {"$pull": {"chat_ids": int(chat_id)}},
+        {"$pull": {"chat_ids": {"$in": [chat_id, str(chat_id)]}}},
         upsert=True,
     )
+    await db.misc.update_one(
+        {"_id": "userbot_live_disabled"},
+        {"$addToSet": {"chat_ids": chat_id}},
+        upsert=True,
+    )
+
+
+async def disable_all_live_forward():
+    ids = list(INDEXED_CHAT_IDS)
+    INDEXED_CHAT_IDS.clear()
+    await db.misc.update_one(
+        {"_id": "userbot_live_chats"},
+        {"$set": {"chat_ids": []}},
+        upsert=True,
+    )
+    if ids:
+        await db.misc.update_one(
+            {"_id": "userbot_live_disabled"},
+            {"$addToSet": {"chat_ids": {"$each": ids}}},
+            upsert=True,
+        )
+    return ids
 
 
 async def _newest_message_id(chat_id):
@@ -265,6 +277,7 @@ async def _backfill_pass(chat_id, progress):
     skipped_count = progress.get("skipped", 0)
     dup_count = progress.get("duplicates", 0)
     last_seen_id = int(progress.get("last_message_id", 0) or 0)
+    skip_left = int(progress.get("skip_left", 0) or 0)
     cursor = last_seen_id + 1
     if cursor < 1:
         cursor = 1
@@ -272,21 +285,6 @@ async def _backfill_pass(chat_id, progress):
     batch = 80
 
     while cursor <= newest:
-        jump_to = SKIP_TO.pop(chat_id, None)
-        if jump_to is not None:
-            cursor = max(1, int(jump_to))
-            last_seen_id = cursor - 1
-            await _save_progress(
-                chat_id, last_message_id=last_seen_id, scanned=scanned,
-                forwarded=forwarded_count, skipped=skipped_count,
-                duplicates=dup_count, status="running",
-            )
-            newest = await _newest_message_id(chat_id)
-            continue
-
-        while BACKFILL_CONTROL.get(chat_id) == "paused":
-            await asyncio.sleep(2)
-
         if BACKFILL_CONTROL.get(chat_id) == "stop":
             await _save_progress(
                 chat_id, last_message_id=last_seen_id, scanned=scanned,
@@ -304,16 +302,22 @@ async def _backfill_pass(chat_id, progress):
             continue
         if not isinstance(messages, list):
             messages = [messages]
+        batch_end = ids[-1]
         for message in messages:
+            mid = getattr(message, "id", None) if message else None
+            if mid:
+                last_seen_id = max(last_seen_id, mid)
             if not message or getattr(message, "empty", False):
-                last_seen_id = max(last_seen_id, getattr(message, "id", cursor))
                 continue
-            last_seen_id = message.id
             scanned += 1
             media = message.video or message.document
             if not media:
                 continue
             if _is_short_video(media):
+                skipped_count += 1
+                continue
+            if skip_left > 0:
+                skip_left -= 1
                 skipped_count += 1
                 continue
             if await _already_have_exact_copy(media.file_name, media.file_size):
@@ -325,11 +329,13 @@ async def _backfill_pass(chat_id, progress):
             except Exception:
                 skipped_count += 1
                 logger.exception(f"[USERBOT-BACKFILL] Failed to forward message {message.id}")
-        cursor = last_seen_id + 1
+        cursor = batch_end + 1
+        last_seen_id = max(last_seen_id, batch_end)
         await _save_progress(
             chat_id, last_message_id=last_seen_id, scanned=scanned,
             forwarded=forwarded_count, skipped=skipped_count,
-            duplicates=dup_count, status="running",
+            duplicates=dup_count, status="running", direction="oldest_first",
+            skip_left=skip_left,
         )
         if scanned % 200 == 0:
             logger.info(
@@ -347,7 +353,7 @@ async def _backfill_pass(chat_id, progress):
     return scanned, forwarded_count, skipped_count, False
 
 
-async def backfill_channel(chat_id, resume=True, start_from=None):
+async def backfill_channel(chat_id, resume=True, start_from=None, skip_files=0):
     """
     Runs continuously until the channel is fully scanned OR the user sends /userbot_stop.
     If an unexpected error happens mid-way, it auto-retries on its own (after a short
@@ -362,27 +368,40 @@ async def backfill_channel(chat_id, resume=True, start_from=None):
     if not USERBOT_BACKUP_CHANNEL:
         raise RuntimeError("USERBOT_BACKUP_CHANNEL is not set on Render.")
 
-    INDEXED_CHAT_IDS.add(chat_id)
-    try:
-        await db.misc.update_one(
-            {"_id": "userbot_live_chats"},
-            {"$addToSet": {"chat_ids": chat_id}},
-            upsert=True,
-        )
-    except Exception:
-        pass
+    if not await _is_live_disabled(chat_id):
+        INDEXED_CHAT_IDS.add(chat_id)
+        try:
+            await db.misc.update_one(
+                {"_id": "userbot_live_chats"},
+                {"$addToSet": {"chat_ids": chat_id}},
+                upsert=True,
+            )
+        except Exception:
+            pass
     BACKFILL_CONTROL[chat_id] = "running"
     retry_delay = 5
     first_pass = True
 
     while True:
-        if first_pass and start_from is not None:
+        if first_pass and (start_from is not None or skip_files):
             progress = {
-                "last_message_id": max(0, int(start_from) - 1),
+                "last_message_id": max(0, int(start_from or 1) - 1) if start_from else 0,
                 "scanned": 0, "forwarded": 0, "skipped": 0, "duplicates": 0,
+                "direction": "oldest_first",
+                "skip_left": int(skip_files or 0),
             }
+        elif first_pass:
+            saved = await _get_progress(chat_id) if resume else {}
+            if saved.get("direction") == "oldest_first" and not skip_files:
+                progress = saved
+            else:
+                progress = {
+                    "last_message_id": 0, "scanned": 0, "forwarded": 0,
+                    "skipped": 0, "duplicates": 0, "direction": "oldest_first",
+                    "skip_left": int(skip_files or 0),
+                }
         else:
-            progress = await _get_progress(chat_id) if resume else {}
+            progress = await _get_progress(chat_id)
         first_pass = False
         try:
             scanned, forwarded, skipped, stopped = await _backfill_pass(chat_id, progress)
@@ -422,24 +441,26 @@ async def start_userbot():
         logger.warning(f"[USERBOT] Could not ensure duplicate-check index: {e}")
 
     for target in USERBOT_CHANNELS:
-        await _join_target(target)
+        chat = await _join_target(target)
+        # env channel join = access only. Live tabhi ON jab disabled na ho.
+        if chat and await _is_live_disabled(chat.id):
+            INDEXED_CHAT_IDS.discard(chat.id)
+            logger.info(f"[USERBOT] Live kept OFF for {chat.id} (user disabled)")
 
-    # Restore live-forward channels after restart (in-memory set is empty on boot)
     try:
         saved = await db.misc.find_one({"_id": "userbot_live_chats"})
         for cid in (saved or {}).get("chat_ids", []):
-            if cid not in INDEXED_CHAT_IDS:
-                chat = await _join_target(str(cid))
-                if chat:
-                    logger.info(f"[USERBOT] Restored live forward for {cid}")
-        async for doc in db.misc.find({"_id": {"$regex": "^backfill_"}}):
-            chat_id_str = doc["_id"].replace("backfill_", "")
             try:
-                cid = int(chat_id_str)
-            except ValueError:
-                cid = chat_id_str
-            if cid not in INDEXED_CHAT_IDS:
-                await _join_target(str(cid))
+                cid_i = int(cid)
+            except (TypeError, ValueError):
+                continue
+            if await _is_live_disabled(cid_i):
+                INDEXED_CHAT_IDS.discard(cid_i)
+                continue
+            if cid_i not in INDEXED_CHAT_IDS:
+                chat = await _join_target(str(cid_i))
+                if chat:
+                    logger.info(f"[USERBOT] Restored live forward for {cid_i}")
     except Exception as e:
         logger.error(f"[USERBOT] Failed to restore live-forward chats: {e}")
 
