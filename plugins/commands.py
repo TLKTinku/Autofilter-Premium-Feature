@@ -82,9 +82,9 @@ async def start(client, message):
         return         
     if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         buttons = [[
-                    InlineKeyboardButton('❤️ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ ❤️', url=f'http://t.me/{temp.U_NAME}?startgroup=true')
+                    InlineKeyboardButton('Add to Group', url=f'http://t.me/{temp.U_NAME}?startgroup=true')
                 ],[
-                    InlineKeyboardButton('🍁 Update Channel 🍁', url=UPDATE_CHNL_LNK)
+                    InlineKeyboardButton('Updates', url=UPDATE_CHNL_LNK)
                   ]]
         reply_markup = InlineKeyboardMarkup(buttons)
         await message.reply(script.GSTART_TXT.format(message.from_user.mention if message.from_user else message.chat.title, temp.U_NAME, temp.B_NAME), reply_markup=reply_markup, disable_web_page_preview=True)
@@ -99,25 +99,25 @@ async def start(client, message):
         await client.send_message(LOG_CHANNEL, script.LOG_TEXT_P.format(message.from_user.id, message.from_user.mention))
     if len(message.command) != 2:
         buttons = [[
-                    InlineKeyboardButton('🔰 ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ 🔰', url=f'http://t.me/{temp.U_NAME}?startgroup=true')
+                    InlineKeyboardButton('Add to Group', url=f'http://t.me/{temp.U_NAME}?startgroup=true')
                 ],[
-                    InlineKeyboardButton(' ʜᴇʟᴘ 📢', callback_data='help'),
-                    InlineKeyboardButton(' ᴀʙᴏᴜᴛ 📖', callback_data='about')
+                    InlineKeyboardButton('Help', callback_data='help'),
+                    InlineKeyboardButton('About', callback_data='about')
                 ],[
-                    InlineKeyboardButton('ᴛᴏᴘ sᴇᴀʀᴄʜɪɴɢ ⭐', callback_data="topsearch"),
-                    InlineKeyboardButton('ᴜᴘɢʀᴀᴅᴇ 🎟', callback_data="premium_info"),
+                    InlineKeyboardButton('Top Search', callback_data="topsearch"),
+                    InlineKeyboardButton('Premium', callback_data="premium_info"),
                 ]]
         reply_markup = InlineKeyboardMarkup(buttons)
         current_time = datetime.now(pytz.timezone(TIMEZONE))
         curr_time = current_time.hour        
         if curr_time < 12:
-            gtxt = "ɢᴏᴏᴅ ᴍᴏʀɴɪɴɢ 🌞" 
+            gtxt = "Good morning" 
         elif curr_time < 17:
-            gtxt = "ɢᴏᴏᴅ ᴀғᴛᴇʀɴᴏᴏɴ 🌓" 
+            gtxt = "Good afternoon" 
         elif curr_time < 21:
-            gtxt = "ɢᴏᴏᴅ ᴇᴠᴇɴɪɴɢ 🌘"
+            gtxt = "Good evening"
         else:
-            gtxt = "ɢᴏᴏᴅ ɴɪɢʜᴛ 🌑"
+            gtxt = "Good night"
         m=await message.reply_text("⏳")
         await asyncio.sleep(0.4)
         await m.delete()        
@@ -131,25 +131,25 @@ async def start(client, message):
 
     if len(message.command) == 2 and message.command[1] in ["subscribe", "error", "okay", "help"]:
         buttons = [[
-                    InlineKeyboardButton('🔰 ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ 🔰', url=f'http://t.me/{temp.U_NAME}?startgroup=true')
+                    InlineKeyboardButton('Add to Group', url=f'http://t.me/{temp.U_NAME}?startgroup=true')
                 ],[
-                    InlineKeyboardButton(' ʜᴇʟᴘ 📢', callback_data='help'),
-                    InlineKeyboardButton(' ᴀʙᴏᴜᴛ 📖', callback_data='about')
+                    InlineKeyboardButton('Help', callback_data='help'),
+                    InlineKeyboardButton('About', callback_data='about')
                 ],[
-                    InlineKeyboardButton('ᴛᴏᴘ sᴇᴀʀᴄʜɪɴɢ ⭐', callback_data="topsearch"),
-                    InlineKeyboardButton('ᴜᴘɢʀᴀᴅᴇ 🎟', callback_data="premium_info"),
+                    InlineKeyboardButton('Top Search', callback_data="topsearch"),
+                    InlineKeyboardButton('Premium', callback_data="premium_info"),
                 ]]
         reply_markup = InlineKeyboardMarkup(buttons)
         current_time = datetime.now(pytz.timezone(TIMEZONE))
         curr_time = current_time.hour        
         if curr_time < 12:
-            gtxt = "ɢᴏᴏᴅ ᴍᴏʀɴɪɴɢ 🌞" 
+            gtxt = "Good morning" 
         elif curr_time < 17:
-            gtxt = "ɢᴏᴏᴅ ᴀғᴛᴇʀɴᴏᴏɴ 🌓" 
+            gtxt = "Good afternoon" 
         elif curr_time < 21:
-            gtxt = "ɢᴏᴏᴅ ᴇᴠᴇɴɪɴɢ 🌘"
+            gtxt = "Good evening"
         else:
-            gtxt = "ɢᴏᴏᴅ ɴɪɢʜᴛ 🌑"
+            gtxt = "Good night"
         m=await message.reply_text("⏳")
         await asyncio.sleep(0.4)
         await m.delete()        
@@ -357,7 +357,7 @@ async def start(client, message):
                     
                     btn = [
                         [InlineKeyboardButton('🚀 ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ / ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}')],
-                        [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
+                        [InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
                     ]
                 elif STREAM_MODE and PREMIUM_STREAM_MODE:
                     
@@ -365,16 +365,16 @@ async def start(client, message):
                         
                         btn = [
                             [InlineKeyboardButton('🚀 ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ / ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ 🖥️', callback_data=f'prestream')],
-                            [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
+                            [InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
                         ]
                     else:
                         
                         btn = [
                             [InlineKeyboardButton('🚀 ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ / ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}')],
-                            [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
+                            [InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
                         ]
                 else:
-                    btn = [[InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]]
+                    btn = [[InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]]
                 msg = await client.send_cached_media(
                     chat_id=message.from_user.id,
                     file_id=file_id,
@@ -401,22 +401,22 @@ async def start(client, message):
             if STREAM_MODE and not PREMIUM_STREAM_MODE:
                 btn = [
                     [InlineKeyboardButton('🚀 ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ / ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}')],
-                    [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
+                    [InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
                 ]
             elif STREAM_MODE and PREMIUM_STREAM_MODE:
                 if not await db.has_premium_access(message.from_user.id):
                    btn = [
                         [InlineKeyboardButton('🚀 ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ / ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ 🖥️', callback_data=f'prestream')],
-                        [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
+                        [InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
                     ]
                 else:
                     btn = [
                         [InlineKeyboardButton('🚀 ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ / ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}')],
-                        [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
+                        [InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
                     ]
             else:
             
-                btn = [[InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]] 
+                btn = [[InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]] 
             msg = await client.send_cached_media(
                 chat_id=message.from_user.id,
                 file_id=file_id,
@@ -470,21 +470,21 @@ async def start(client, message):
     if STREAM_MODE and not PREMIUM_STREAM_MODE:
         btn = [
             [InlineKeyboardButton('🚀 ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ / ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}')],
-            [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
+            [InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
         ]
     elif STREAM_MODE and PREMIUM_STREAM_MODE:
         if not await db.has_premium_access(message.from_user.id):
             btn = [
                 [InlineKeyboardButton('🚀 ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ / ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ 🖥️', callback_data=f'prestream')],
-                [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
+                [InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
             ]
         else:
             btn = [
                 [InlineKeyboardButton('🚀 ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ / ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}')],
-                [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
+                [InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
             ]
     else:
-        btn = [[InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]]
+        btn = [[InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]]
     msg = await client.send_cached_media(
         chat_id=message.from_user.id,
         file_id=file_id,
@@ -1501,82 +1501,22 @@ async def repair_names_cmd(client, message):
     )
 
 
-@Client.on_message(filters.command('userbot_skip') & filters.user(ADMINS))
-async def userbot_skip_cmd(client, message):
-    from userbot_index import SKIP_TO, _save_progress, _get_progress
-    if len(message.command) < 3:
-        return await message.reply_text(
-            "Usage: <code>/userbot_skip -1001234567890 123456</code>\n"
-            "Pehla id channel ka, doosra message id jahan se aage skip karna hai.\n"
-            "Ye turant apply hota hai — bot restart ki zaroorat nahi."
-        )
-    try:
-        chat_id = int(message.command[1])
-    except ValueError:
-        chat_id = message.command[1]
-    try:
-        jump_id = int(message.command[2])
-    except ValueError:
-        return await message.reply_text("❌ Message id number hona chahiye.")
-    SKIP_TO[chat_id] = jump_id
-    await _save_progress(chat_id, last_message_id=jump_id, status="running")
-    p = await _get_progress(chat_id)
-    await message.reply_text(
-        f"✅ Skip apply ho gaya.\nChannel: <code>{chat_id}</code>\n"
-        f"Ab yahan se continue: <code>{jump_id}</code>\n"
-        f"Saved status: <code>{p.get('status')}</code>"
-    )
-
-
-@Client.on_message(filters.command('userbot_pause') & filters.user(ADMINS))
-async def userbot_pause_cmd(client, message):
-    from userbot_index import BACKFILL_CONTROL
-    if len(message.command) < 2:
-        return await message.reply_text("Usage: <code>/userbot_pause -1001234567890</code>")
-    try:
-        chat_id = int(message.command[1])
-    except ValueError:
-        chat_id = message.command[1]
-    if chat_id not in BACKFILL_CONTROL:
-        return await message.reply_text("⚠️ No backfill is currently running for that channel.")
-    BACKFILL_CONTROL[chat_id] = "paused"
-    await message.reply_text("⏸️ Paused. It's holding its current position — resume anytime with /userbot_resume.")
-
-
-@Client.on_message(filters.command('userbot_resume') & filters.user(ADMINS))
-async def userbot_resume_cmd(client, message):
-    from userbot_index import BACKFILL_CONTROL
-    if len(message.command) < 2:
-        return await message.reply_text("Usage: <code>/userbot_resume -1001234567890</code>")
-    try:
-        chat_id = int(message.command[1])
-    except ValueError:
-        chat_id = message.command[1]
-    if chat_id not in BACKFILL_CONTROL:
-        return await message.reply_text("⚠️ That backfill isn't paused right now (it may have stopped — use /userbot_backfill to restart it, it'll resume from where it left off).")
-    BACKFILL_CONTROL[chat_id] = "running"
-    await message.reply_text("▶️ Resumed.")
-
-
-@Client.on_message(filters.command('userbot_stop') & filters.user(ADMINS))
+@Client.on_message(filters.command(['stopforward', 'userbot_stop']))
 async def userbot_stop_cmd(client, message):
     from userbot_index import BACKFILL_CONTROL
     if len(message.command) < 2:
-        return await message.reply_text("Usage: <code>/userbot_stop -1001234567890</code>")
+        return await message.reply_text("Usage: <code>/stopforward -100ID</code>")
     try:
         chat_id = int(message.command[1])
     except ValueError:
         chat_id = message.command[1]
     if chat_id not in BACKFILL_CONTROL:
-        return await message.reply_text("⚠️ No backfill is currently running for that channel.")
+        return await message.reply_text("Koi forward chal nahi raha.")
     BACKFILL_CONTROL[chat_id] = "stop"
-    await message.reply_text(
-        "🛑 Stopping... progress up to this point is saved. "
-        "Run /userbot_backfill again anytime to continue from here — it won't restart from scratch."
-    )
+    await message.reply_text("🛑 Forward stop. Progress save hai. /autoforward se aage chalega.")
 
 
-@Client.on_message(filters.command('userbot_backfill'))
+@Client.on_message(filters.command(['autoforward', 'forwardstart']))
 async def userbot_backfill_cmd(client, message):
     from userbot_index import userbot, backfill_channel, INDEXED_CHAT_IDS
     uid = message.from_user.id if message.from_user else 0
@@ -1584,47 +1524,48 @@ async def userbot_backfill_cmd(client, message):
         return await message.reply_text(f"Sirf admin. Teri ID: <code>{uid}</code>")
     if not userbot or not userbot.is_connected:
         return await message.reply_text(
-            "❌ Userbot is not running. Set USER_SESSION, USERBOT_CHANNELS and USERBOT_BACKUP_CHANNEL on Render first, then redeploy."
+            "❌ Userbot OFF. USER_SESSION + USERBOT_BACKUP_CHANNEL set karo."
         )
     if len(message.command) < 2:
         return await message.reply_text(
-            "Usage:\n"
-            "<code>/userbot_backfill -1001234567890</code>\n"
-            "<code>/userbot_backfill -1001234567890 15000</code>\n\n"
-            "15000 = pehli 15000 skip, phir oldest se nayi taraf.\n"
-            "Nayi upload live catch hongi.\n"
-            f"Live channels: <code>{', '.join(str(c) for c in INDEXED_CHAT_IDS) or 'none'}</code>"
+            "Shuru se forward (purani file pehle):\n"
+            "<code>/autoforward -100ID</code>\n"
+            "Pehli 100000 files skip, phir aage:\n"
+            "<code>/autoforward -100ID 100000</code>\n"
+            "Duplicate nahi jaayegi.\n"
+            "Live nayi files: <code>/live_on -100ID</code>"
         )
     try:
         chat_id = int(message.command[1])
     except ValueError:
-        chat_id = message.command[1]
+        return await message.reply_text("Channel id number do, jaise -100123...")
 
-    restart_from_top = len(message.command) > 2 and message.command[2].lower() == "restart"
-    custom_start_id = None
-    if len(message.command) > 2 and message.command[2].lstrip("-").isdigit():
-        custom_start_id = int(message.command[2])
+    skip_files = 0
+    if len(message.command) > 2 and message.command[2].isdigit():
+        skip_files = int(message.command[2])
 
     status = await message.reply_text(
-        (f"⏳ {custom_start_id} se start...\n" if custom_start_id else
-         "⏳ Upar se scan...\n" if restart_from_top else
-         "⏳ Resume / start...\n") +
-        f"Duplicate jaldi skip honge.\n"
-        f"/userbot_stop {chat_id}  |  /userbot_status {chat_id}"
+        f"⏳ Shuru se forward\n"
+        f"Skip files: <code>{skip_files}</code>\n"
+        f"Duplicate skip on.\n"
+        f"/userbot_stop {chat_id}  |  /live_status"
     )
 
     async def _run():
         try:
             scanned, forwarded, skipped = await backfill_channel(
                 chat_id,
-                resume=not restart_from_top and custom_start_id is None,
-                start_from=custom_start_id
+                resume=skip_files == 0,
+                skip_files=skip_files,
             )
             await status.edit_text(
-                f"✅ Backfill complete!\n\nScanned: <code>{scanned}</code>\nForwarded to backup channel: <code>{forwarded}</code>\nFailed: <code>{skipped}</code>"
+                f"✅ Forward complete\n"
+                f"Scanned: <code>{scanned}</code>\n"
+                f"Forwarded: <code>{forwarded}</code>\n"
+                f"Skip/fail: <code>{skipped}</code>"
             )
         except Exception as e:
-            await status.edit_text(f"❌ Backfill failed: {e}\n\nDon't worry, progress is saved — just run /userbot_backfill {chat_id} again to resume.")
+            await status.edit_text(f"❌ Fail: {e}\n/autoforward {chat_id} dubara chalana.")
 
     client.loop.create_task(_run())
 
