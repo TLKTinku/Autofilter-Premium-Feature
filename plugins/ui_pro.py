@@ -168,3 +168,26 @@ async def ui_settings(_, query):
             [InlineKeyboardButton("💎 Premium", callback_data="premium_info")],
         ),
     )
+
+
+async def dispatch_ui(query):
+    data = query.data or ""
+    if data == "ui_home":
+        await show_home(query)
+    elif data == "ui_search":
+        await ui_search(None, query)
+    elif data == "ui_help":
+        await ui_help(None, query)
+    elif data == "ui_h_search":
+        await ui_h_search(None, query)
+    elif data == "ui_account":
+        await ui_account(None, query)
+    elif data == "ui_request":
+        await ui_request(None, query)
+    elif data == "ui_settings":
+        await ui_settings(None, query)
+    else:
+        try:
+            await query.answer()
+        except Exception:
+            pass
