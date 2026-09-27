@@ -137,3 +137,91 @@ async def group_list_cmd(client, message):
     if len(text) > 3500:
         text = text[:3500] + "\n…"
     await message.reply_text(text)
+
+
+@Client.on_message(filters.command(["viewgroup", "chkgroup", "groupinfo"]) & filters.user(ADMINS))
+async def view_group_cmd(client, message):
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: <code>/viewgroup -1004475130741</code>")
+    raw = message.command[1]
+    try:
+        gid = int(raw)
+    except ValueError:
+        return await message.reply_text("Numeric id do.")
+    try:
+        chat = await client.get_chat(gid)
+    except Exception as e:
+        return await message.reply_text(
+            f"Bot is group/channel ko ab open nahi kar saka.\n"
+            f"<code>{gid}</code>\n"
+            f"{e}\n\n"
+            f"Try: https://t.me/c/{str(gid).replace('-100','')}/1"
+        )
+    uname = f"@{chat.username}" if getattr(chat, "username", None) else "private (no username)"
+    ctype = str(getattr(chat, "type", "")).replace("ChatType.", "")
+    members = getattr(chat, "members_count", None) or "—"
+    link = f"https://t.me/{chat.username}" if getattr(chat, "username", None) else f"https://t.me/c/{str(gid).replace('-100','')}/1"
+    invite = ""
+    try:
+        inv = await client.export_chat_invite_link(gid)
+        invite = f"\nInvite: {inv}"
+    except Exception:
+        pass
+    await message.reply_text(
+        f"<b>{chat.title}</b>\n"
+        f"ID: <code>{chat.id}</code>\n"
+        f"Type: <code>{ctype}</code>\n"
+        f"Username: {uname}\n"
+        f"Members: <code>{members}</code>\n"
+        f"Link: {link}{invite}"
+    )
+
+
+@Client.on_message(filters.command(["mychats", "channels", "mychannels"]) & filters.user(ADMINS))
+async def my_chats_cmd(client, message):
+    status = await message.reply_text("⏳ Chats nikal raha hoon...")
+    lines = ["<b>Mongo (bot ne save kiye)</b>"]
+    mongo = Media.collection.database
+    n = 0
+    try:
+        async for g in mongo["groups"].find({}):
+            n += 1
+            gid = g.get("id") or g.get("_id")
+            title = g.get("title") or "—"
+            lines.append(f"• <code>{gid}</code> — {title}")
+    except Exception as e:
+        lines.append(f"Mongo fail: {e}")
+    if n == 0:
+        lines.append("— koi nahi")
+
+    lines.append("\n<b>Userbot account ke channels/groups</b>")
+    try:
+        from userbot_index import userbot
+        if not userbot or not userbot.is_connected:
+            lines.append("Userbot OFF — session wali list nahi mil sakti.")
+        else:
+            c = 0
+            async for d in userbot.get_dialogs():
+                chat = d.chat
+                t = str(getattr(chat, "type", ""))
+                if "PRIVATE" in t.upper() and "CHANNEL" not in t.upper():
+                    if "GROUP" not in t.upper() and "SUPER" not in t.upper() and "CHANNEL" not in t.upper():
+                        continue
+                kind = t.replace("ChatType.", "")
+                if kind.lower() in ("private", "bot"):
+                    continue
+                c += 1
+                if c > 80:
+                    lines.append("…")
+                    break
+                un = f" @{chat.username}" if getattr(chat, "username", None) else ""
+                lines.append(f"• <code>{chat.id}</code> [{kind}] {chat.title}{un}")
+            if c == 0:
+                lines.append("— list khali / access nahi")
+    except Exception as e:
+        lines.append(f"Userbot list fail: {e}")
+
+    text = "\n".join(lines)
+    if len(text) > 3500:
+        text = text[:3500] + "\n…"
+    await status.edit_text(text)
