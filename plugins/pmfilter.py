@@ -27,17 +27,6 @@ lock = asyncio.Lock()
 logger = logging.getLogger(__name__)
 
 
-def _pro_font(text):
-    """MY MOVIES premium typography: readable Unicode bold for key UI labels."""
-    table = str.maketrans(
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-        "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇"
-    )
-    return str(text).translate(table)
-
-def _pro_label(icon, text):
-    return f"{icon} {_pro_font(text)}"
-
 def _pro_file_btn(file):
     """Compact, useful file label: quality, language, episode/season, size."""
     name = clean_filename(getattr(file, "file_name", None) or "File")
@@ -203,22 +192,22 @@ def _pro_search_markup(state):
         group = groups[idx]
         rows.append([
             InlineKeyboardButton(
-                f"🎬 {_pro_font(group['title'])}  ·  {group['count']} file{'s' if group['count'] != 1 else ''}",
+                f"🎬 {group['title']}  ·  {group['count']} file{'s' if group['count'] != 1 else ''}",
                 callback_data=f"mmt#{state['key']}#{idx}",
             )
         ])
 
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(_pro_label("‹", "Previous"), callback_data=f"mmprev#{state['key']}"))
+        nav.append(InlineKeyboardButton("‹ Previous", callback_data=f"mmprev#{state['key']}"))
     if end < len(groups):
-        nav.append(InlineKeyboardButton(_pro_label("➜", "Next"), callback_data=f"mmnext#{state['key']}"))
+        nav.append(InlineKeyboardButton("Next ›", callback_data=f"mmnext#{state['key']}"))
     if nav:
         rows.append(nav)
 
     rows.append([
-        InlineKeyboardButton(_pro_label("💎", "Premium"), url=f"https://t.me/{temp.U_NAME}?start=premium"),
-        InlineKeyboardButton(_pro_label("🏠", "Home"), callback_data="ui_home"),
+        InlineKeyboardButton("💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+        InlineKeyboardButton("🏠 Home", callback_data="ui_home"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -226,13 +215,13 @@ def _pro_search_markup(state):
 def _pro_detail_markup(key, files, next_offset, total_results, req):
     rows = [
         [
-            InlineKeyboardButton(_pro_label("💎", "Premium"), url=f"https://t.me/{temp.U_NAME}?start=premium"),
-            InlineKeyboardButton(_pro_label("📦", "Send All"), callback_data=f"sendfiles#{key}"),
+            InlineKeyboardButton("💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+            InlineKeyboardButton("📦 Send All", callback_data=f"sendfiles#{key}"),
         ],
         [
-            InlineKeyboardButton(_pro_label("🎚", "Quality"), callback_data=f"qualities#{key}"),
-            InlineKeyboardButton(_pro_label("🌐", "Language"), callback_data=f"languages#{key}"),
-            InlineKeyboardButton(_pro_label("📺", "Season"), callback_data=f"seasons#{key}"),
+            InlineKeyboardButton("🎚 Quality", callback_data=f"qualities#{key}"),
+            InlineKeyboardButton("🌐 Language", callback_data=f"languages#{key}"),
+            InlineKeyboardButton("📺 Season", callback_data=f"seasons#{key}"),
         ],
     ]
     rows.extend([
@@ -242,12 +231,12 @@ def _pro_detail_markup(key, files, next_offset, total_results, req):
 
     nav = []
     if next_offset != "":
-        nav.append(InlineKeyboardButton(_pro_label("➜", "Next"), callback_data=f"mfilenext#{key}#{next_offset}"))
+        nav.append(InlineKeyboardButton("Next ›", callback_data=f"mfilenext#{key}#{next_offset}"))
     if nav:
         rows.append(nav)
     rows.append([
-        InlineKeyboardButton(_pro_label("⬅️", "Back to Movies"), callback_data=f"mback#{PRO_DETAIL[key]['search_key']}"),
-        InlineKeyboardButton(_pro_label("🏠", "Home"), callback_data="ui_home"),
+        InlineKeyboardButton("⬅️ Back to Movies", callback_data=f"mback#{PRO_DETAIL[key]['search_key']}"),
+        InlineKeyboardButton("🏠 Home", callback_data="ui_home"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -273,12 +262,12 @@ def _pro_search_caption(state):
     shown = max(0, end - start + 1) if groups else 0
     return (
         "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
-        f"        🎬 <b>{_pro_font('SEARCH RESULTS')}</b>\n"
+        "        🎬 <b>SEARCH RESULTS</b>\n"
         "┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
         f"🔎 <b>{query_text}</b>\n"
         f"📂 <b>{len(groups)}</b> movie titles found\n"
         f"📄 Page <b>{page}/{total_pages}</b> • Showing <b>{shown}</b>\n\n"
-        f"💡 <b>{_pro_font('Quick Tip')}:</b> Movie name par tap karein —\n"
+        "💡 <b>Quick Tip:</b> Movie name par tap karein —\n"
         "   next page par available files milengi."
     )
 
@@ -369,12 +358,12 @@ def _pro_detail_caption(title, total, meta, files, display_title=None):
         "┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
         f"<b>{safe_title}</b>\n"
         f"{year}\n\n"
-        f"⭐ <b>{rating}/10</b>\n"
+        f"⭐ {rating}/10\n"
         f"🎭 {genres}\n"
         f"⏱ {runtime}\n"
         f"🌐 {languages}\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📂 <b>{_pro_font('AVAILABLE FILES')}</b>"
+        "📂 <b>AVAILABLE FILES</b>"
     )
 
 
@@ -450,7 +439,7 @@ async def _pro_render_detail(client, query, key, offset=0, push_history=True):
     history = state.get("history", [0])
     if len(history) > 1:
         markup.inline_keyboard.insert(2, [
-            InlineKeyboardButton(_pro_label("‹", "Previous Files"), callback_data=f"mfileprev#{key}")
+            InlineKeyboardButton("‹ Previous Files", callback_data=f"mfileprev#{key}")
         ])
 
     # First visit: create a real poster message. Later pages: edit its caption/buttons.
@@ -803,13 +792,13 @@ async def next_page(bot, query):
                 [InlineKeyboardButton("‹ Back", callback_data=f"next_{req}_{key}_{off_set}"), InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1}", callback_data="pages")]
             )
         elif off_set is None:
-            btn.append([InlineKeyboardButton("Page", callback_data="pages"), InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1}", callback_data="pages"), InlineKeyboardButton(_pro_label("➜", "Next"), callback_data=f"next_{req}_{key}_{n_offset}")])
+            btn.append([InlineKeyboardButton("Page", callback_data="pages"), InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1}", callback_data="pages"), InlineKeyboardButton("Next ›", callback_data=f"next_{req}_{key}_{n_offset}")])
         else:
             btn.append(
                 [
                     InlineKeyboardButton("‹ Back", callback_data=f"next_{req}_{key}_{off_set}"),
                     InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1}", callback_data="pages"),
-                    InlineKeyboardButton(_pro_label("➜", "Next"), callback_data=f"next_{req}_{key}_{n_offset}")
+                    InlineKeyboardButton("Next ›", callback_data=f"next_{req}_{key}_{n_offset}")
                 ],
             )
     else:
@@ -826,7 +815,7 @@ async def next_page(bot, query):
                         f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages")])
                 elif off_set is None:
                     btn.append([InlineKeyboardButton("Page", callback_data="pages"), InlineKeyboardButton(
-                        f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"), InlineKeyboardButton(_pro_label("➜", "Next"), callback_data=f"next_{req}_{key}_{n_offset}")])
+                        f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"), InlineKeyboardButton("Next ›", callback_data=f"next_{req}_{key}_{n_offset}")])
                 else:
                     btn.append(
                         [
@@ -850,7 +839,7 @@ async def next_page(bot, query):
                         f"{math.ceil(int(offset)/int(MAX_B_TN))+1} / {math.ceil(total/int(MAX_B_TN))}", callback_data="pages")])
                 elif off_set is None:
                     btn.append([InlineKeyboardButton("Page", callback_data="pages"), InlineKeyboardButton(
-                        f"{math.ceil(int(offset)/int(MAX_B_TN))+1} / {math.ceil(total/int(MAX_B_TN))}", callback_data="pages"), InlineKeyboardButton(_pro_label("➜", "Next"), callback_data=f"next_{req}_{key}_{n_offset}")])
+                        f"{math.ceil(int(offset)/int(MAX_B_TN))+1} / {math.ceil(total/int(MAX_B_TN))}", callback_data="pages"), InlineKeyboardButton("Next ›", callback_data=f"next_{req}_{key}_{n_offset}")])
                 else:
                     btn.append(
                         [
@@ -877,7 +866,7 @@ async def next_page(bot, query):
                 )
             elif off_set is None:
                 btn.append([InlineKeyboardButton("Page", callback_data="pages"), InlineKeyboardButton(
-                    f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"), InlineKeyboardButton(_pro_label("➜", "Next"), callback_data=f"next_{req}_{key}_{n_offset}")])
+                    f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"), InlineKeyboardButton("Next ›", callback_data=f"next_{req}_{key}_{n_offset}")])
             else:
                 btn.append(
                     [
