@@ -98,7 +98,7 @@ async def start(client, message):
         await db.add_user(message.from_user.id, message.from_user.first_name)
         await client.send_message(LOG_CHANNEL, script.LOG_TEXT_P.format(message.from_user.id, message.from_user.mention))
     if len(message.command) != 2:
-        from plugins.ui_pro import home_kb
+        from plugins.ui_pro import home_kb, home_text
         buttons = None
         reply_markup = home_kb()
         current_time = datetime.now(pytz.timezone(TIMEZONE))
@@ -116,14 +116,14 @@ async def start(client, message):
         await m.delete()        
         await message.reply_photo(
             photo=random.choice(PICS),
-            caption=script.START_TXT.format(message.from_user.mention, gtxt, temp.U_NAME, temp.B_NAME),
+            caption=home_text(message.from_user.mention),
             reply_markup=reply_markup,
             parse_mode=enums.ParseMode.HTML
         )
         return
 
     if len(message.command) == 2 and message.command[1] in ["subscribe", "error", "okay", "help"]:
-        from plugins.ui_pro import home_kb
+        from plugins.ui_pro import home_kb, home_text
         buttons = None
         reply_markup = home_kb()
         current_time = datetime.now(pytz.timezone(TIMEZONE))
@@ -141,7 +141,7 @@ async def start(client, message):
         await m.delete()        
         await message.reply_photo(
             photo=random.choice(PICS),
-            caption=script.START_TXT.format(message.from_user.mention, gtxt, temp.U_NAME, temp.B_NAME),
+            caption=home_text(message.from_user.mention),
             reply_markup=reply_markup,
             parse_mode=enums.ParseMode.HTML
         )
@@ -189,19 +189,14 @@ async def start(client, message):
         return
         
     if len(message.command) == 2 and message.command[1] in ["premium"]:
-        buttons = [[
-                    InlineKeyboardButton('📲 ꜱᴇɴᴅ ᴘᴀʏᴍᴇɴᴛ ꜱᴄʀᴇᴇɴꜱʜᴏᴛ', url=OWNER_LNK)
-                  ],[
-                    InlineKeyboardButton('❌ ᴄʟᴏꜱᴇ ❌', callback_data='close_data')
-                  ]]
-        reply_markup = InlineKeyboardMarkup(buttons)
+        from plugins.ui_pro import premium_overview_text, premium_overview_kb
         await message.reply_photo(
-            photo=(SUBSCRIPTION),
-            caption=script.PREPLANS_TXT.format(message.from_user.mention, OWNER_UPI_ID, QR_CODE),
-            reply_markup=reply_markup,
-            parse_mode=enums.ParseMode.HTML
+            photo=SUBSCRIPTION,
+            caption=premium_overview_text(),
+            reply_markup=premium_overview_kb(),
+            parse_mode=enums.ParseMode.HTML,
         )
-        return  
+        return
     
     if len(message.command) == 2 and message.command[1].startswith('getfile'):
         movies = message.command[1].split("-", 1)[1] 
