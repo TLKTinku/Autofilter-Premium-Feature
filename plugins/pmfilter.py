@@ -23,6 +23,24 @@ from datetime import datetime, timedelta
 lock = asyncio.Lock()
 
 logger = logging.getLogger(__name__)
+
+
+def _pro_file_btn(file):
+    name = clean_filename(getattr(file, "file_name", None) or "File")
+    size = get_size(getattr(file, "file_size", 0) or 0)
+    raw = name.lower().replace(" ", "")
+    qual = ""
+    for tag, show in (
+        ("2160p", "4K"), ("4k", "4K"), ("1440p", "1440P"),
+        ("1080p", "1080P"), ("720p", "720P"), ("480p", "480P"), ("360p", "360P"),
+    ):
+        if tag in raw:
+            qual = show
+            break
+    short = name[:26] + ("…" if len(name) > 26 else "")
+    if qual:
+        return f"✦ {qual} · {size} · {short}"
+    return f"✦ {size} · {short}"
 logger.setLevel(logging.ERROR)
 
 tracemalloc.start()
@@ -172,7 +190,7 @@ async def next_page(bot, query):
     if settings.get('button'):
         btn = [
             [
-                InlineKeyboardButton(text=f"🎬 {clean_filename(file.file_name)} • {get_size(file.file_size)}", callback_data=f'file#{file.file_id}'),
+                InlineKeyboardButton(text=_pro_file_btn(file), callback_data=f'file#{file.file_id}'),
             ]
             for file in files
         ]
@@ -448,7 +466,7 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
     if settings.get('button'):
         btn = [
             [
-                InlineKeyboardButton(text=f"🎬 {clean_filename(file.file_name)} • {get_size(file.file_size)}", callback_data=f'file#{file.file_id}'),
+                InlineKeyboardButton(text=_pro_file_btn(file), callback_data=f'file#{file.file_id}'),
             ]
             for file in files
         ]
@@ -606,7 +624,7 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
     if settings.get('button'):
         btn = [
             [
-                InlineKeyboardButton(text=f"🎬 {clean_filename(file.file_name)} • {get_size(file.file_size)}", callback_data=f'file#{file.file_id}'),
+                InlineKeyboardButton(text=_pro_file_btn(file), callback_data=f'file#{file.file_id}'),
             ]
             for file in files
         ]
@@ -758,7 +776,7 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
             [
                 [
                     InlineKeyboardButton(
-                        f"🎬 {clean_filename(f.file_name)} • {get_size(f.file_size)}",
+                        _pro_file_btn(f),
                         callback_data=f"file#{f.file_id}",
                     )
                 ]
