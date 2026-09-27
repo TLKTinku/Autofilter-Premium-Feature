@@ -1,7 +1,8 @@
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from info import UPDATE_CHNL_LNK
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from info import UPDATE_CHNL_LNK, GRP_LNK, PICS
 from utils import temp
+import random
 
 
 def home_kb():
@@ -49,14 +50,25 @@ def home_text(name="there"):
 
 async def _edit(query, text, markup):
     msg = query.message
+    pic = None
     try:
-        if msg.photo or msg.video or msg.animation or msg.document:
+        if PICS:
+            pic = random.choice(PICS)
+    except Exception:
+        pic = None
+    try:
+        if pic:
+            await msg.edit_media(InputMediaPhoto(pic, caption=text), reply_markup=markup)
+        elif msg.photo or msg.video or msg.animation or msg.document:
             await msg.edit_caption(caption=text, reply_markup=markup)
         else:
             await msg.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
     except Exception:
         try:
-            await msg.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
+            if pic:
+                await msg.reply_photo(pic, caption=text, reply_markup=markup)
+            else:
+                await msg.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
         except Exception:
             pass
     try:
@@ -107,7 +119,7 @@ async def ui_help(_, query):
         nav_kb(
             [InlineKeyboardButton("🔎 Search Guide", callback_data="ui_h_search")],
             [InlineKeyboardButton("📨 Request Guide", callback_data="ui_request")],
-            [InlineKeyboardButton("🆘 Support", url=UPDATE_CHNL_LNK or "https://t.me")],
+            [InlineKeyboardButton("🆘 Support", url=GRP_LNK or UPDATE_CHNL_LNK or "https://t.me/officialmymovies")],
         ),
     )
 
