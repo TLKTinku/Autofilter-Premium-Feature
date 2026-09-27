@@ -1,37 +1,54 @@
 class script(object):
     START_TXT = """╭━━━━━━━━━━━━━━━━━━━━╮
-        🎬 <b>MOVIE HUB</b>
-     Fast file search bot
+       🎬 <b>𝐌𝐘 𝐌𝐎𝐕𝐈𝐄𝐒</b>
+   ᴍᴏᴠɪᴇs • sᴇʀɪᴇs • ᴀɴɪᴍᴇ • ᴋᴅʀᴀᴍᴀ
 ╰━━━━━━━━━━━━━━━━━━━━╯
 
-Hi {0}
+👋 Hey, {0}!
 
-Movies • Series • Anime • KDrama
-Type a name to search."""
+🍿 Find your favourite movies,
+series and more in seconds.
 
+━━━━━━━━━━━━━━━━━━━━━━
+        ✦ <b>𝐌𝐄𝐍𝐔</b> ✦
+━━━━━━━━━━━━━━━━━━━━━━
 
-    GSTART_TXT = """🎬 <b>MOVIE HUB</b>
+⚡ Fast • Simple • Organized"""
 
-Hi {0}
+    GSTART_TXT = """<b>🚩 ᴊᴀɪ ꜱʜʀɪ ʀᴀᴍ 🚩</b>
 
-Movies • Series • Anime • KDrama
-Type a name in this group to search."""
+<b>ʜᴇʏ {},</b>
+
+<b>🤖 ɪ ᴀᴍ <a href=https://t.me/{}>{}</a>, ᴛʜᴇ ᴍᴏꜱᴛ ᴘᴏᴡᴇʀꜰᴜʟ ᴀᴜᴛᴏ ꜰɪʟᴛᴇʀ ʙᴏᴛ ᴡɪᴛʜ ᴘʀᴇᴍɪᴜᴍ ꜰᴇᴀᴛᴜʀᴇꜱ.</b>"""
 
     
-    HELP_TXT = """❓ <b>Help</b>
+    HELP_TXT = """<b>
+✨ ʜᴏᴡ ᴛᴏ ʀᴇǫᴜᴇꜱᴛ ᴍᴏᴠɪᴇꜱ & DRAMAS & ANIME & WEBSERIES ✨  
 
-Send the title here or in the group.
+1️⃣ ꜱᴇᴀʀᴄʜ ᴛʜᴇ ᴄᴏʀʀᴇᴄᴛ ɴᴀᴍᴇ ᴏɴ ɢᴏᴏɢʟᴇ.  
+2️⃣ ꜱᴇɴᴅ ᴛʜᴇ ɴᴀᴍᴇ ɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ.  
+3️⃣ ᴜꜱᴇ ᴛʜɪꜱ ꜰᴏʀᴍᴀᴛ:  
 
-Movie + year
-<code>Joker 2019</code>
+📌 ꜰᴏʀ ꜱᴇʀɪᴇꜱ:  
+➤ ᴅʀᴀᴍᴀ ɴᴀᴍᴇ + S01  
 
-Series + season
-<code>Name S01</code>"""
+📌 ꜰᴏʀ ʜɪɴᴅɪ ᴅʀᴀᴍᴀꜱ / ANIME:  
+➤ ᴅʀᴀᴍᴀ ɴᴀᴍᴇ + ʜɪɴᴅɪ  
 
-    ABOUT_TXT = """👤 <b>My Account</b>
+📌 ꜰᴏʀ ᴍᴏᴠɪᴇꜱ:  
+➤ ᴍᴏᴠɪᴇ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴇx: ᴊᴏᴋᴇʀ 2019)  
+</b>"""
 
-Bot : <a href="https://t.me/{0}">{1}</a>
-Owner : <a href="{2}">here</a>"""
+    ABOUT_TXT = """<b>╭────[ ᴍʏ ᴅᴇᴛᴀɪʟs ]────⍟
+├⍟ Mʏ Nᴀᴍᴇ : <a href=https://t.me/{}>{}</a>
+├⍟ Dᴇᴠᴇʟᴏᴘᴇʀ : <a href={}>ᴏᴡɴᴇʀ</a> 
+├⍟ Lɪʙʀᴀʀʏ : <a href='https://docs.pyrogram.org/'>ᴘʏʀᴏɢʀᴀᴍ</a>
+├⍟ Lᴀɴɢᴜᴀɢᴇ : <a href='https://www.python.org/download/releases/3.0/'>ᴘʏᴛʜᴏɴ 𝟹</a> 
+├⍟ Dᴀᴛᴀʙᴀsᴇ : <a href='https://www.mongodb.com/'>ᴍᴏɴɢᴏ ᴅʙ</a> 
+├⍟ Bᴏᴛ Sᴇʀᴠᴇʀ : <a href='https://heroku.com/'>ʜᴇʀᴏᴋᴜ</a> 
+├⍟ Bᴜɪʟᴅ Sᴛᴀᴛᴜs : ᴠ1.4 [ ꜱᴛᴀʙʟᴇ ]
+╰───────────────⍟</b>"""
+
     RESTART_TXT = """
 <b>{} Bᴏᴛ Rᴇsᴛᴀʀᴛᴇᴅ !
 
