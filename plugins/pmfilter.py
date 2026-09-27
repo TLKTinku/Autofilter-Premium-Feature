@@ -16,7 +16,6 @@ from database.refer import referdb
 from database.users_chats_db import db
 import asyncio
 import re
-import html
 import math
 import random
 import pytz
@@ -42,6 +41,178 @@ def _pro_file_btn(file):
     if qual:
         return f"✦ {qual} · {size} · {short}"
     return f"✦ {size} · {short}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MY MOVIES — resource-safe grouped search UI
+# Keeps MongoDB reads paged; never loads thousands of files into RAM at once.
+# ─────────────────────────────────────────────────────────────────────────────
+PRO_SEARCH = {}
+PRO_MOVIE = {}
+PRO_SCAN_BATCH = 40
+PRO_MAX_SCAN = 400
+PRO_PAGE_SIZE = 10
+
+_PRO_QUALITY_RE = re.compile(r"\b(?:2160p|1440p|1080p|720p|480p|360p|4k)\b", re.I)
+_PRO_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+_PRO_NOISE_RE = re.compile(
+    r"\b(?:2160p|1440p|1080p|720p|480p|360p|4k|web[- .]?dl|webrip|web|bluray|blu[ ._-]?ray|brrip|hdrip|hdtv|x264|x265|hevc|av1|aac|ddp?|dts|atmos|dual[ ._-]?audio|multi[ ._-]?audio|hindi|english|tamil|telugu|malayalam|kannada|punjabi|gujarati|marathi|mkv|mp4|avi|mov|yts|ssfilms|moviezzclub|toonflex)\b.*$",
+    re.I,
+)
+_PRO_SOURCE_PREFIX_RE = re.compile(r"^(?:toonflex|moviezzclub|ssfilms|yts)[\s._-]+", re.I)
+
+
+def _pro_title(file_name):
+    """Create a conservative display/search title without changing the DB filename."""
+    name = re.sub(r"\.[A-Za-z0-9]{1,8}$", "", clean_filename(file_name or "File"))
+    name = re.sub(r"[._]+", " ", name)
+    name = re.sub(r"\[[^\]]*\]", " ", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    year = _PRO_YEAR_RE.search(name)
+    if year:
+        name = name[:year.end()]
+    else:
+        name = _PRO_NOISE_RE.sub("", name)
+    name = re.sub(r"(?:\s+(?:part|cd|disc|disk)?\s*\d{1,3})$", "", name, flags=re.I)
+    name = _PRO_SOURCE_PREFIX_RE.sub("", name).strip(" -._")
+    name = re.sub(r"\s+", " ", name).strip()
+    return name.title() or "Untitled"
+
+
+def _pro_title_key(title):
+    return re.sub(r"[^a-z0-9]+", "", (title or "").lower())
+
+
+def _pro_caption_editable(message):
+    return bool(getattr(message, "photo", None) or getattr(message, "video", None) or getattr(message, "animation", None))
+
+
+async def _pro_edit_message(message, text, markup):
+    try:
+        if _pro_caption_editable(message):
+            await message.edit_caption(caption=text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
+        else:
+            await message.edit_text(text=text, reply_markup=markup, disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
+    except MessageNotModified:
+        pass
+
+
+async def _pro_discover_titles(chat_id, query, first_files, first_offset, total_results):
+    """Discover at most 10 titles while reading only small DB pages."""
+    groups = {}
+    scanned = 0
+    offset = 0
+    page = first_files or []
+    next_offset = first_offset
+
+    while True:
+        for f in page:
+            scanned += 1
+            title = _pro_title(getattr(f, "file_name", "File"))
+            k = _pro_title_key(title)
+            if k not in groups:
+                groups[k] = {"title": title, "count": 0, "query": title}
+            groups[k]["count"] += 1
+            if len(groups) >= 10:
+                break
+        if len(groups) >= 10 or not next_offset or scanned >= PRO_MAX_SCAN:
+            break
+        try:
+            offset = int(next_offset)
+        except Exception:
+            break
+        page, next_offset, _ = await get_search_results(
+            chat_id, query, max_results=PRO_SCAN_BATCH, offset=offset, filter=True
+        )
+        if not page:
+            break
+
+    return list(groups.values()), next_offset, scanned
+
+
+def _pro_search_markup(state):
+    rows = [[InlineKeyboardButton("💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+             InlineKeyboardButton("📦 Send All", callback_data=f"sendfiles#{state['key']}")]]
+    rows.append([InlineKeyboardButton("🎚 Quality", callback_data=f"mq#{state['key']}"),
+                 InlineKeyboardButton("🌐 Language", callback_data=f"ml#{state['key']}"),
+                 InlineKeyboardButton("📺 Season", callback_data=f"ms#{state['key']}")])
+    for i, g in enumerate(state["groups"]):
+        rows.append([InlineKeyboardButton(
+            f"🎬 {g['title']}  ·  {g['count']}+ files",
+            callback_data=f"mt#{state['key']}#{i}"
+        )])
+    nav = []
+    if state.get("scan_offset"):
+        nav.append(InlineKeyboardButton("More titles ›", callback_data=f"mnext#{state['key']}"))
+    nav.append(InlineKeyboardButton("🏠 Home", callback_data="ui_home"))
+    rows.append(nav)
+    return InlineKeyboardMarkup(rows)
+
+
+async def _pro_show_search(query, key):
+    state = PRO_SEARCH.get(key)
+    if not state:
+        return await query.answer("⚠️ This search has expired. Please search again.", show_alert=True)
+    await _pro_edit_message(query.message, state["caption"], _pro_search_markup(state))
+    await query.answer()
+
+
+async def _pro_load_movie_page(query, key, index, offset=0, filter_query=None):
+    state = PRO_SEARCH.get(key)
+    if not state:
+        return await query.answer("⚠️ This search has expired. Please search again.", show_alert=True)
+    try:
+        index = int(index)
+    except Exception:
+        return await query.answer("⚠️ Invalid movie selection.", show_alert=True)
+    if index < 0 or index >= len(state["groups"]):
+        return await query.answer("⚠️ Movie is no longer available.", show_alert=True)
+
+    group = state["groups"][index]
+    search_query = filter_query or group["query"]
+    files, next_offset, total = await get_search_results(
+        query.message.chat.id, search_query, max_results=PRO_PAGE_SIZE, offset=offset, filter=True
+    )
+    if not files:
+        return await query.answer("🚫 No files found.", show_alert=True)
+
+    detail_key = f"{key}:m{index}:{offset}"
+    FRESH[detail_key] = search_query
+    temp.GETALL[detail_key] = files
+    PRO_MOVIE[detail_key] = {"search_key": key, "index": index, "query": search_query}
+
+    rows = [[InlineKeyboardButton("💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+             InlineKeyboardButton("📦 Send All", callback_data=f"sendfiles#{detail_key}")],
+            [InlineKeyboardButton("🎚 Quality", callback_data=f"mqm#{detail_key}"),
+             InlineKeyboardButton("🌐 Language", callback_data=f"mlm#{detail_key}"),
+             InlineKeyboardButton("📺 Season", callback_data=f"msm#{detail_key}")]]
+    for f in files:
+        rows.append([InlineKeyboardButton(_pro_file_btn(f), callback_data=f"file#{f.file_id}")])
+
+    nav = []
+    if offset > 0:
+        prev = max(0, offset - PRO_PAGE_SIZE)
+        nav.append(InlineKeyboardButton("‹ Prev", callback_data=f"mp#{key}#{index}#{prev}"))
+    if next_offset:
+        nav.append(InlineKeyboardButton("Next ›", callback_data=f"mp#{key}#{index}#{next_offset}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton("⬅️ Back to titles", callback_data=f"mb#{key}"),
+                 InlineKeyboardButton("🏠 Home", callback_data="ui_home")])
+
+    title = group["title"]
+    detail_text = (
+        f"╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"      🎬 <b>{title}</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"📂 <b>{total}</b> files available\n"
+        f"⚡ Page {offset // PRO_PAGE_SIZE + 1}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"       ✦ <b>SELECT FILE</b> ✦\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━"
+    )
+    await _pro_edit_message(query.message, detail_text, InlineKeyboardMarkup(rows))
+    await query.answer()
+
 logger.setLevel(logging.ERROR)
 
 tracemalloc.start()
@@ -57,175 +228,6 @@ BUTTONS2 = {}
 SPELL_CHECK = {}
 OWNER_REQ_CACHE = {}
 ADMIN_AWAITING_REPLY = {}  # admin_user_id -> req_key, while they're typing a custom reply
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MY MOVIES search UI
-# Search results are grouped by movie title instead of showing every file as a
-# separate result.  The existing file/download callbacks remain unchanged.
-# ─────────────────────────────────────────────────────────────────────────────
-MOVIE_GROUPS = {}
-MOVIE_GROUP_PAGE_SIZE = 10
-MOVIE_FILE_PAGE_SIZE = 20
-MOVIE_GROUP_FETCH_LIMIT = 3000
-
-
-def _movie_display_title(file_name):
-    """Return a stable movie/series title from a noisy indexed filename.
-
-    Most indexed releases contain a year.  Using the first 19xx/20xx year as
-    the boundary is much safer than trying to maintain a huge release-tag list.
-    """
-    name = clean_filename(file_name or "File")
-    name = re.sub(r"\.(?:mkv|mp4|avi|mov|webm|m4v|ts)$", "", name, flags=re.I)
-    name = re.sub(r"\b(?:mkv|mp4|avi|mov|webm|m4v|ts)\b$", "", name, flags=re.I).strip()
-
-    # Common release/source words that frequently appear before the real title.
-    source_prefixes = re.compile(
-        r"^(?:moviezzclub|toonflex|ssfilms|yts|yify|world4ufree|moviesmod|"
-        r"vegamovies|skymovieshd|mkvcinemas|afilmywap|filmyzilla|filmycab|"
-        r"extramovies|moviezwap|bollyflix)\s+",
-        re.I,
-    )
-    name = source_prefixes.sub("", name).strip()
-
-    # Prefer the title + year.  This collapses variants such as:
-    # "The Avengers 2012 1 mkv" and "The Avengers 2012 4 mkv".
-    year_match = re.search(r"\b((?:19|20)\d{2})\b", name)
-    if year_match:
-        title = name[:year_match.end()]
-    else:
-        # No year: cut at common release metadata.
-        cut = re.search(
-            r"\b(?:2160p|1440p|1080p|720p|480p|360p|4k|hdr|dv|hevc|h265|h264|"
-            r"x265|x264|web[- ._]?dl|web[- ._]?rip|webrip|bluray|brrip|dvdrip|"
-            r"dual[- ._]?audio|multi[- ._]?audio|hindi|english|tamil|telugu|"
-            r"malayalam|kannada|bengali|marathi|punjabi|gujarati|korean|japanese|"
-            r"french|german|spanish|italian|sub(?:bed|s)?|subtitle(?:s)?|yts|yify|"
-            r"ssfilms|moviezzclub|toonflex)\b",
-            name,
-            re.I,
-        )
-        title = name[:cut.start()] if cut else name
-
-    # Remove release counters left after a year, e.g. "2012 1" / "2012 4".
-    title = re.sub(r"\s+(?:\d{1,3}|[A-Z])\s*$", "", title).strip()
-    title = re.sub(r"[._|]+", " ", title)
-    title = re.sub(r"\s{2,}", " ", title).strip(" -_[]")
-    return title or clean_filename(file_name or "File") or "File"
-
-
-def _movie_group_key(title):
-    return re.sub(r"[^a-z0-9]+", "", title.casefold())
-
-
-def _build_movie_groups(files):
-    groups = {}
-    order = []
-    seen_files = set()
-    for file in files:
-        file_id = getattr(file, "file_id", None)
-        if file_id and file_id in seen_files:
-            continue
-        if file_id:
-            seen_files.add(file_id)
-        title = _movie_display_title(getattr(file, "file_name", ""))
-        key = _movie_group_key(title)
-        if not key:
-            key = f"file{len(order)}"
-        if key not in groups:
-            groups[key] = {"title": title, "files": []}
-            order.append(key)
-        groups[key]["files"].append(file)
-    return [groups[key] for key in order]
-
-
-async def _fetch_movie_groups(chat_id, search):
-    """Fetch enough matching files to group a search without changing DB code."""
-    all_files = []
-    offset = 0
-    while len(all_files) < MOVIE_GROUP_FETCH_LIMIT:
-        remaining = MOVIE_GROUP_FETCH_LIMIT - len(all_files)
-        chunk_size = min(200, remaining)
-        files, next_offset, total = await get_search_results(
-            chat_id=chat_id,
-            query=search,
-            max_results=chunk_size,
-            offset=offset,
-            filter=True,
-        )
-        if not files:
-            break
-        all_files.extend(files)
-        try:
-            next_offset = int(next_offset) if next_offset not in ("", None) else 0
-        except (TypeError, ValueError):
-            next_offset = 0
-        if not next_offset or next_offset <= offset:
-            break
-        offset = next_offset
-        if total and len(all_files) >= int(total):
-            break
-    return _build_movie_groups(all_files), len(all_files)
-
-
-def _movie_list_markup(key, page=0):
-    groups = MOVIE_GROUPS.get(key, [])
-    start = max(0, page) * MOVIE_GROUP_PAGE_SIZE
-    page_groups = groups[start:start + MOVIE_GROUP_PAGE_SIZE]
-    buttons = []
-    for index, group in enumerate(page_groups, start=start):
-        count = len(group["files"])
-        count_text = f" · {count} files" if count != 1 else " · 1 file"
-        title = html.escape(group["title"][:50])
-        buttons.append([
-            InlineKeyboardButton(
-                text=f"🎬 {group['title'][:50]}{count_text}",
-                callback_data=f"moviefiles#{key}#{index}#0",
-            )
-        ])
-    total_pages = max(1, (len(groups) + MOVIE_GROUP_PAGE_SIZE - 1) // MOVIE_GROUP_PAGE_SIZE)
-    current_page = min(page + 1, total_pages)
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton("‹ Back", callback_data=f"moviespage#{key}#{page - 1}"))
-    if page + 1 < total_pages:
-        nav.append(InlineKeyboardButton(f"{current_page}/{total_pages}", callback_data="pages"))
-        nav.append(InlineKeyboardButton("Next ›", callback_data=f"moviespage#{key}#{page + 1}"))
-    elif total_pages > 1:
-        nav.append(InlineKeyboardButton(f"{current_page}/{total_pages}", callback_data="pages"))
-    if nav:
-        buttons.append(nav)
-    buttons.append([InlineKeyboardButton("🚫 Close", callback_data="close_data")])
-    return buttons, current_page, total_pages
-
-
-def _movie_files_markup(key, index, page=0):
-    groups = MOVIE_GROUPS.get(key, [])
-    if index < 0 or index >= len(groups):
-        return None, None
-    group = groups[index]
-    files = group["files"]
-    start = max(0, page) * MOVIE_FILE_PAGE_SIZE
-    page_files = files[start:start + MOVIE_FILE_PAGE_SIZE]
-    buttons = [
-        [InlineKeyboardButton(_pro_file_btn(file), callback_data=f"file#{file.file_id}")]
-        for file in page_files
-    ]
-    total_pages = max(1, (len(files) + MOVIE_FILE_PAGE_SIZE - 1) // MOVIE_FILE_PAGE_SIZE)
-    current_page = min(page + 1, total_pages)
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton("‹ Prev", callback_data=f"moviefiles#{key}#{index}#{page - 1}"))
-    if page + 1 < total_pages:
-        nav.append(InlineKeyboardButton(f"{current_page}/{total_pages}", callback_data="pages"))
-        nav.append(InlineKeyboardButton("Next ›", callback_data=f"moviefiles#{key}#{index}#{page + 1}"))
-    elif total_pages > 1:
-        nav.append(InlineKeyboardButton(f"{current_page}/{total_pages}", callback_data="pages"))
-    if nav:
-        buttons.append(nav)
-    buttons.append([InlineKeyboardButton("⬅️ Back to Movies", callback_data=f"movieback#{key}#0")])
-    return buttons, group
 
 
 @Client.on_message(filters.group & filters.text & filters.incoming)
@@ -328,87 +330,6 @@ async def refercall(bot, query):
         parse_mode=enums.ParseMode.HTML
     )
     await query.answer()
-
-
-@Client.on_callback_query(filters.regex(r"^moviespage#"))
-async def movies_page_cb(client, query):
-    try:
-        _, key, page = query.data.split("#", 2)
-        page = int(page)
-        groups = MOVIE_GROUPS.get(key)
-        if groups is None:
-            search = FRESH.get(key)
-            if not search:
-                return await query.answer("⚠️ This search has expired. Please search again.", show_alert=True)
-            groups, _ = await _fetch_movie_groups(query.message.chat.id, search)
-            MOVIE_GROUPS[key] = groups
-        markup, current_page, total_pages = _movie_list_markup(key, page)
-        text = f"🔎 <b>Search Results</b>\n\n🎬 <b>{len(groups)}</b> movies found"
-        if query.message.photo:
-            await query.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup(markup))
-        else:
-            await query.message.edit_text(text=text, reply_markup=InlineKeyboardMarkup(markup), disable_web_page_preview=True)
-        await query.answer(f"Page {current_page}/{total_pages}")
-    except Exception:
-        logger.exception("movies_page_cb failed")
-        await query.answer("⚠️ Could not open this page. Please search again.", show_alert=True)
-
-
-@Client.on_callback_query(filters.regex(r"^moviefiles#"))
-async def movie_files_cb(client, query):
-    try:
-        _, key, index, page = query.data.split("#", 3)
-        index, page = int(index), int(page)
-        groups = MOVIE_GROUPS.get(key)
-        if groups is None:
-            search = FRESH.get(key)
-            if not search:
-                return await query.answer("⚠️ This search has expired. Please search again.", show_alert=True)
-            groups, _ = await _fetch_movie_groups(query.message.chat.id, search)
-            MOVIE_GROUPS[key] = groups
-        markup, group = _movie_files_markup(key, index, page)
-        if group is None:
-            return await query.answer("⚠️ Movie not found. Please search again.", show_alert=True)
-        temp.GETALL[key] = group["files"]
-        temp.SHORT[query.from_user.id] = query.message.chat.id
-        text = (
-            f"🎬 <b>{html.escape(group['title'])}</b>\n\n"
-            f"📂 <b>{len(group['files'])}</b> file{'s' if len(group['files']) != 1 else ''} available\n"
-            f"📄 Page {page + 1}/{max(1, (len(group['files']) + MOVIE_FILE_PAGE_SIZE - 1) // MOVIE_FILE_PAGE_SIZE)}"
-        )
-        if query.message.photo:
-            await query.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup(markup))
-        else:
-            await query.message.edit_text(text=text, reply_markup=InlineKeyboardMarkup(markup), disable_web_page_preview=True)
-        await query.answer()
-    except Exception:
-        logger.exception("movie_files_cb failed")
-        await query.answer("⚠️ Could not open this movie. Please search again.", show_alert=True)
-
-
-@Client.on_callback_query(filters.regex(r"^movieback#"))
-async def movie_back_cb(client, query):
-    try:
-        _, key, page = query.data.split("#", 2)
-        page = int(page)
-        groups = MOVIE_GROUPS.get(key)
-        if groups is None:
-            search = FRESH.get(key)
-            if not search:
-                return await query.answer("⚠️ This search has expired. Please search again.", show_alert=True)
-            groups, _ = await _fetch_movie_groups(query.message.chat.id, search)
-            MOVIE_GROUPS[key] = groups
-        markup, current_page, total_pages = _movie_list_markup(key, page)
-        text = f"🔎 <b>Search Results</b>\n\n🎬 <b>{len(groups)}</b> movies found"
-        if query.message.photo:
-            await query.message.edit_caption(caption=text, reply_markup=InlineKeyboardMarkup(markup))
-        else:
-            await query.message.edit_text(text=text, reply_markup=InlineKeyboardMarkup(markup), disable_web_page_preview=True)
-        await query.answer()
-    except Exception:
-        logger.exception("movie_back_cb failed")
-        await query.answer("⚠️ Could not go back. Please search again.", show_alert=True)
-
 
 @Client.on_callback_query(filters.regex(r"^next"))
 async def next_page(bot, query):
@@ -2063,6 +1984,218 @@ async def cb_handler(client: Client, query: CallbackQuery):
     await query.answer(MSG_ALRT)
 
 
+
+
+@Client.on_callback_query(filters.regex(r"^mq#"))
+async def pro_search_quality_menu(client, query):
+    key = query.data.split("#", 1)[1]
+    if key not in PRO_SEARCH:
+        return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
+    rows = []
+    for i in range(0, len(QUALITIES), 2):
+        row = [InlineKeyboardButton(QUALITIES[i], callback_data=f"mfs#{key}#{QUALITIES[i].lower()}")]
+        if i + 1 < len(QUALITIES):
+            row.append(InlineKeyboardButton(QUALITIES[i + 1], callback_data=f"mfs#{key}#{QUALITIES[i+1].lower()}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton("↩️ Back to results", callback_data=f"mshow#{key}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(rows))
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^ml#"))
+async def pro_search_language_menu(client, query):
+    key = query.data.split("#", 1)[1]
+    if key not in PRO_SEARCH:
+        return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
+    items = list(LANGUAGES.items())
+    rows = []
+    for i in range(0, len(items), 2):
+        row = [InlineKeyboardButton(items[i][0], callback_data=f"mfs#{key}#{items[i][1]}")]
+        if i + 1 < len(items):
+            row.append(InlineKeyboardButton(items[i + 1][0], callback_data=f"mfs#{key}#{items[i+1][1]}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton("↩️ Back to results", callback_data=f"mshow#{key}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(rows))
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^ms#"))
+async def pro_search_season_menu(client, query):
+    key = query.data.split("#", 1)[1]
+    if key not in PRO_SEARCH:
+        return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
+    rows = []
+    for i in range(0, len(SEASONS), 2):
+        row = [InlineKeyboardButton(SEASONS[i], callback_data=f"mfs#{key}#{SEASONS[i].lower()}")]
+        if i + 1 < len(SEASONS):
+            row.append(InlineKeyboardButton(SEASONS[i + 1], callback_data=f"mfs#{key}#{SEASONS[i+1].lower()}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton("↩️ Back to results", callback_data=f"mshow#{key}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(rows))
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^mshow#"))
+async def pro_search_show(client, query):
+    _, key = query.data.split("#", 1)
+    await _pro_show_search(query, key)
+
+
+@Client.on_callback_query(filters.regex(r"^mfs#"))
+async def pro_search_filter(client, query):
+    _, key, token = query.data.split("#", 2)
+    state = PRO_SEARCH.get(key)
+    if not state:
+        return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
+    base = state.get("base_query", state["query"])
+    filtered_query = f"{base} {token}"
+    files, next_offset, total = await get_search_results(
+        query.message.chat.id, filtered_query, max_results=10, offset=0, filter=True
+    )
+    if not files:
+        return await query.answer("🚫 No files found for this filter.", show_alert=True)
+    groups, scan_offset, _ = await _pro_discover_titles(
+        query.message.chat.id, filtered_query, files, next_offset, total
+    )
+    state["query"] = filtered_query
+    state["groups"] = groups
+    state["scan_offset"] = scan_offset
+    state["total_results"] = total
+    state["active_filter"] = token
+    state["caption"] = (
+        f"╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"      🎬 <b>𝐌𝐘 𝐌𝐎𝐕𝐈𝐄𝐒</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"🔎 <b>{base}</b>\n"
+        f"🎚 Filter: <code>{token.upper()}</code>\n"
+        f"📂 {total} matching files\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"       ✦ <b>SELECT A TITLE</b> ✦\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━"
+    )
+    await _pro_show_search(query, key)
+
+
+@Client.on_callback_query(filters.regex(r"^mt#"))
+async def pro_movie_title(client, query):
+    _, key, index = query.data.split("#")
+    await _pro_load_movie_page(query, key, index, 0)
+
+
+@Client.on_callback_query(filters.regex(r"^mp#"))
+async def pro_movie_page(client, query):
+    _, key, index, offset = query.data.split("#")
+    await _pro_load_movie_page(query, key, index, int(offset))
+
+
+@Client.on_callback_query(filters.regex(r"^mb#"))
+async def pro_movie_back(client, query):
+    _, key = query.data.split("#")
+    await _pro_show_search(query, key)
+
+
+@Client.on_callback_query(filters.regex(r"^mnext#"))
+async def pro_more_titles(client, query):
+    _, key = query.data.split("#")
+    state = PRO_SEARCH.get(key)
+    if not state or not state.get("scan_offset"):
+        return await query.answer("No more titles found.", show_alert=True)
+    try:
+        offset = int(state["scan_offset"])
+    except Exception:
+        return await query.answer("Search expired. Please search again.", show_alert=True)
+    files, next_offset, _ = await get_search_results(
+        query.message.chat.id, state["query"], max_results=PRO_SCAN_BATCH, offset=offset, filter=True
+    )
+    seen = {_pro_title_key(g["title"]) for g in state["groups"]}
+    for f in files:
+        title = _pro_title(getattr(f, "file_name", "File"))
+        k = _pro_title_key(title)
+        if k in seen:
+            continue
+        state["groups"].append({"title": title, "count": 1, "query": title})
+        seen.add(k)
+        if len(state["groups"]) >= 10:
+            break
+    state["scan_offset"] = next_offset
+    await _pro_show_search(query, key)
+
+
+async def _pro_filter_movie(client, query, detail_key, token):
+    movie = PRO_MOVIE.get(detail_key)
+    if not movie:
+        return await query.answer("⚠️ Movie session expired. Search again.", show_alert=True)
+    base = movie["query"]
+    search = base if token in (None, "homepage") else f"{base} {token}"
+    files, next_offset, total = await get_search_results(
+        query.message.chat.id, search, max_results=PRO_PAGE_SIZE, offset=0, filter=True
+    )
+    if not files:
+        return await query.answer("🚫 No matching files found.", show_alert=True)
+    FRESH[detail_key] = search
+    temp.GETALL[detail_key] = files
+    # Keep the same movie title/index but use filtered query for subsequent pages.
+    movie["query"] = search
+    await _pro_load_movie_page(query, movie["search_key"], movie["index"], 0, filter_query=search)
+
+
+@Client.on_callback_query(filters.regex(r"^mqm#"))
+async def pro_movie_quality(client, query):
+    detail_key = query.data.split("#", 1)[1]
+    buttons = []
+    for i in range(0, len(QUALITIES), 2):
+        row = [InlineKeyboardButton(QUALITIES[i], callback_data=f"mfilter#{detail_key}#{QUALITIES[i].lower()}")]
+        if i + 1 < len(QUALITIES):
+            row.append(InlineKeyboardButton(QUALITIES[i + 1], callback_data=f"mfilter#{detail_key}#{QUALITIES[i+1].lower()}"))
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("↩️ Back to files", callback_data=f"mback#{detail_key}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(buttons))
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^mlm#"))
+async def pro_movie_language(client, query):
+    detail_key = query.data.split("#", 1)[1]
+    items = list(LANGUAGES.items())
+    buttons = []
+    for i in range(0, len(items), 2):
+        row = [InlineKeyboardButton(items[i][0], callback_data=f"mfilter#{detail_key}#{items[i][1]}")]
+        if i + 1 < len(items):
+            row.append(InlineKeyboardButton(items[i + 1][0], callback_data=f"mfilter#{detail_key}#{items[i+1][1]}"))
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("↩️ Back to files", callback_data=f"mback#{detail_key}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(buttons))
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^msm#"))
+async def pro_movie_season(client, query):
+    detail_key = query.data.split("#", 1)[1]
+    buttons = []
+    for i in range(0, len(SEASONS), 2):
+        row = [InlineKeyboardButton(SEASONS[i], callback_data=f"mfilter#{detail_key}#{SEASONS[i].lower()}")]
+        if i + 1 < len(SEASONS):
+            row.append(InlineKeyboardButton(SEASONS[i + 1], callback_data=f"mfilter#{detail_key}#{SEASONS[i+1].lower()}"))
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("↩️ Back to files", callback_data=f"mback#{detail_key}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(buttons))
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^mfilter#"))
+async def pro_movie_filter(client, query):
+    _, detail_key, token = query.data.split("#", 2)
+    await _pro_filter_movie(client, query, detail_key, token)
+
+
+@Client.on_callback_query(filters.regex(r"^mback#"))
+async def pro_movie_filter_back(client, query):
+    detail_key = query.data.split("#", 1)[1]
+    movie = PRO_MOVIE.get(detail_key)
+    if not movie:
+        return await query.answer("⚠️ Movie session expired.", show_alert=True)
+    await _pro_load_movie_page(query, movie["search_key"], movie["index"], 0, filter_query=movie["query"])
+
 async def auto_filter(client, msg, spoll=False):
     """
     Core auto_filter logic with timing/debug logging removed.
@@ -2160,11 +2293,21 @@ async def auto_filter(client, msg, spoll=False):
         temp.GETALL[key] = files
         temp.SHORT[message.from_user.id] = message.chat.id
 
-        # Build the new movie-level result list from the complete matching set.
-        movie_groups, grouped_file_count = await _fetch_movie_groups(message.chat.id, search)
-        MOVIE_GROUPS[key] = movie_groups
-        btn, _, _ = _movie_list_markup(key, 0)
-
+        groups, scan_offset, scanned = await _pro_discover_titles(
+            message.chat.id, search, files, offset, total_results
+        )
+        PRO_SEARCH[key] = {
+            "key": key,
+            "chat_id": message.chat.id,
+            "user_id": message.from_user.id if message.from_user else 0,
+            "query": search,
+            "base_query": search,
+            "groups": groups,
+            "scan_offset": scan_offset,
+            "total_results": total_results,
+            "caption": None,
+        }
+        btn = None
         if settings.get('imdb'):
             imdb = await get_posterx(search, file=(files[0]).file_name) if TMDB_POSTER else await get_poster(search, file=(files[0]).file_name)
         else:
@@ -2240,6 +2383,10 @@ async def auto_filter(client, msg, spoll=False):
 
                     for idx, file in enumerate(files, start=1):
                         cap += f"<b>\n{idx}. <a href='https://telegram.me/{temp.U_NAME}?start=file_{message.chat.id}_{file.file_id}'>[{get_size(file.file_size)}] {clean_filename(file.file_name)}\n</a></b>"
+
+        # Store the final caption so Back restores the exact same result state.
+        PRO_SEARCH[key]["caption"] = cap
+        btn = _pro_search_markup(PRO_SEARCH[key])
 
         sent = None
         try:
