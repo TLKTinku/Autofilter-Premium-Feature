@@ -173,9 +173,11 @@ Nᴀᴍᴇ - {}
 
 If your spelling is correct and it's still not found, please request the owner using the button below, then try again after some time."""
 
-    REQUEST_SENT_TXT = """<b>Your request has been sent to the owner.
+    REQUEST_SENT_TXT = """<b>✅ Your request has been sent to the owner.
 
-Please wait, it will be added soon.</b>"""
+Please wait, it will be added soon.
+
+💡 <u>Quick Tip:</u> The search system has been updated. Once your movie is available, search its name again and <u>tap the movie-name button</u>. The next page will show the available files.</b>"""
 
     I_CUD_NT = """<b>ɪ ᴄᴏᴜʟᴅɴ'ᴛ ꜰɪɴᴅ ᴀɴʏ ᴍᴏᴠɪᴇ ʀᴇʟᴀᴛᴇᴅ ᴛᴏ {}.
 
