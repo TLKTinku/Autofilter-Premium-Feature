@@ -1,6 +1,6 @@
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
-from info import UPDATE_CHNL_LNK, GRP_LNK, PICS
+from info import UPDATE_CHNL_LNK, GRP_LNK, PICS, OWNER_LNK, OWNER_UPI_ID
 from utils import temp
 from database.users_chats_db import db
 import random
@@ -149,7 +149,6 @@ def premium_plans_kb():
 
 
 def premium_upi_text():
-    from info import OWNER_UPI_ID
     return (
         "╭────────────────────────╮\n"
         "│       💳 <b>UPI</b>          │\n"
@@ -169,34 +168,42 @@ def premium_upi_kb():
 
 
 async def show_myplan(query):
+    """Render the account plan screen without depending on the /myplan command UI."""
     user_id = query.from_user.id
     user = query.from_user.mention
-    data = await db.get_user(user_id)
-    if data and data.get("expiry_time"):
-        expiry = data["expiry_time"].astimezone(pytz.timezone("Asia/Kolkata"))
-        now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
-        remaining = expiry - now
-        if remaining.total_seconds() <= 0:
-            active = False
-        else:
-            active = True
-        if active:
-            total_seconds = int(remaining.total_seconds())
-            days, rem = divmod(total_seconds, 86400)
-            hours, rem = divmod(rem, 3600)
-            minutes = rem // 60
+    try:
+        data = await db.get_user(user_id)
+    except Exception:
+        data = None
+
+    status = "● FREE"
+    left = "No active premium plan"
+    expiry_text = "—"
+
+    expiry = data.get("expiry_time") if data else None
+    if expiry:
+        tz = pytz.timezone("Asia/Kolkata")
+        try:
+            if expiry.tzinfo is None:
+                expiry = tz.localize(expiry)
+            else:
+                expiry = expiry.astimezone(tz)
+            now = datetime.datetime.now(tz)
+            remaining = expiry - now
+            expiry_text = expiry.strftime("%d %b %Y  •  %I:%M %p")
+            if remaining.total_seconds() > 0:
+                total_seconds = int(remaining.total_seconds())
+                days, rem = divmod(total_seconds, 86400)
+                hours, rem = divmod(rem, 3600)
+                minutes = rem // 60
+                status = "● ACTIVE"
+                left = f"{days}d  {hours}h  {minutes}m"
+            else:
+                status = "● EXPIRED"
+                left = "Expired"
+        except Exception:
             status = "● ACTIVE"
-            left = f"{days}d  {hours}h  {minutes}m"
-            expiry_text = expiry.strftime("%d %b %Y  •  %I:%M %p")
-        else:
-            status = "● EXPIRED"
-            left = "Expired"
-            expiry_text = expiry.strftime("%d %b %Y  •  %I:%M %p")
-    else:
-        active = False
-        status = "● FREE"
-        left = "No active premium plan"
-        expiry_text = "—"
+            left = "Premium status available"
 
     text = (
         "╭────────────────────────╮\n"
@@ -210,8 +217,8 @@ async def show_myplan(query):
         "━━━━━━━━━━━━━━━━━━━━━━"
     )
     kb = InlineKeyboardMarkup([
-        [_btn("💎  Extend Plan", callback_data="premium_info")],
-        [_btn("⬅  Back", callback_data="ui_home"), _btn("🏠  Home", callback_data="ui_home")],
+        [_btn("💎  Extend / Upgrade", callback_data="premium_info")],
+        [_btn("⬅  Back", callback_data="premium_info"), _btn("🏠  Home", callback_data="ui_home")],
     ])
     await _edit(query, text, kb)
 
@@ -389,6 +396,7 @@ async def dispatch_ui(query):
         "ui_request": ui_request,
         "ui_settings": ui_settings,
         "ui_about": ui_about,
+        "ui_myplan": ui_myplan,
     }
     handler = handlers.get(data)
     if handler:

@@ -70,7 +70,7 @@ def _pro_file_btn(file):
     language = "/".join(langs[:2])
 
     parts = [x for x in (quality, language, episode, size) if x]
-    return "•".join(parts) if parts else size
+    return "  •  ".join(parts) if parts else size
 
 logger.setLevel(logging.ERROR)
 
@@ -387,7 +387,10 @@ def _pro_detail_caption(title, total, meta, files, display_title=None, offset=0)
     if year:
         info_lines.append(f"📅 { _html_escape(year) }")
     if rating:
-        info_lines.append(f"⭐ <b>{_html_escape(rating)}/10</b>")
+        rating_text = str(rating).strip()
+        if not rating_text.lower().endswith("/10"):
+            rating_text += "/10"
+        info_lines.append(f"⭐ <b>{_html_escape(rating_text)}</b>")
     if genres:
         info_lines.append(f"🎭 {_html_escape(genres)}")
     if runtime:
@@ -462,6 +465,7 @@ async def _pro_render_detail(client, query, key, offset=0, push_history=True):
         offset = int(offset)
     except (TypeError, ValueError):
         offset = 0
+    state["current_offset"] = offset
 
     active_query = state.get("active_query") or title
     files, next_offset, total = await get_search_results(
@@ -587,6 +591,8 @@ async def _pro_show_movie(client, query, key, index):
         "history": [0],
         "meta": None,
         "season_number": None,
+        "season_query": None,
+        "current_offset": 0,
         "user_id": query.from_user.id if query.from_user else 0,
     }
     await _pro_render_detail(client, query, detail_key, 0, push_history=False)
@@ -1007,6 +1013,46 @@ async def advantage_spoll_choker(bot, query):
         await k.delete()
 
 # Qualities
+def _pro_filter_back_row(key):
+    state = PRO_DETAIL.get(key) or {}
+    offset = int(state.get("current_offset", 0) or 0)
+    return [
+        InlineKeyboardButton("↩ Back to Files", callback_data=f"mfilterback#{key}"),
+        InlineKeyboardButton("🏠 Home", callback_data="ui_home"),
+    ]
+
+
+async def _pro_render_filtered_detail(client, query, key, search, *, keep_meta=True):
+    state = PRO_DETAIL.get(key)
+    if not state:
+        return await query.answer("⚠️ This movie page has expired.", show_alert=True)
+    files, _, _ = await get_search_results(query.message.chat.id, search, offset=0, filter=True)
+    if not files:
+        return await query.answer("🚫 No matching files found.", show_alert=True)
+    state["active_query"] = search
+    state["history"] = [0]
+    state["current_offset"] = 0
+    if not keep_meta:
+        state["meta"] = state.get("base_meta") or state.get("meta") or {}
+    return await _pro_render_detail(client, query, key, 0, push_history=False)
+
+
+@Client.on_callback_query(filters.regex(r"^mfilterback#"))
+async def pro_filter_back(client, query):
+    key = query.data.split("#", 1)[1]
+    state = PRO_DETAIL.get(key)
+    if not state:
+        return await query.answer("⚠️ This movie page has expired.", show_alert=True)
+    # Restore the base title/season query instead of entering any legacy renderer.
+    state["active_query"] = state.get("season_query") or state.get("title") or FRESH.get(key)
+    if state.get("season_number"):
+        # Keep the selected season metadata/poster.
+        pass
+    else:
+        state["meta"] = state.get("base_meta") or state.get("meta") or {}
+    return await _pro_render_detail(client, query, key, int(state.get("current_offset", 0) or 0), push_history=False)
+
+
 @Client.on_callback_query(filters.regex(r"^qualities#"))
 async def qualities_cb_handler(client: Client, query: CallbackQuery):
     try:
@@ -1020,6 +1066,16 @@ async def qualities_cb_handler(client: Client, query: CallbackQuery):
         pass
 
     _, key = query.data.split("#")
+    if key in PRO_DETAIL:
+        btn = [[InlineKeyboardButton("🎚  SELECT QUALITY", callback_data="ident")]]
+        for i in range(0, len(QUALITIES), 2):
+            row = [InlineKeyboardButton(QUALITIES[i], callback_data=f"fq#{QUALITIES[i].lower()}#{key}")]
+            if i + 1 < len(QUALITIES):
+                row.append(InlineKeyboardButton(QUALITIES[i + 1], callback_data=f"fq#{QUALITIES[i + 1].lower()}#{key}"))
+            btn.append(row)
+        btn.append(_pro_filter_back_row(key))
+        return await query.edit_message_reply_markup(InlineKeyboardMarkup(btn))
+
     search = FRESH.get(key)
     search = search.replace(' ', '_')
 
@@ -1049,6 +1105,14 @@ async def qualities_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^fq#"))
 async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
     _, qual, key = query.data.split("#")
+    if key in PRO_DETAIL:
+        state = PRO_DETAIL[key]
+        base = state.get("title") or FRESH.get(key) or "Movie"
+        if qual == "homepage":
+            state["active_query"] = state.get("season_query") or base
+        else:
+            state["active_query"] = f"{base} {qual}"
+        return await _pro_render_filtered_detail(client, query, key, state["active_query"], keep_meta=True)
     curr_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
     search = FRESH.get(key)
     search = search.replace("_", " ")
@@ -1181,6 +1245,19 @@ async def languages_cb_handler(client: Client, query: CallbackQuery):
         pass
 
     _, key = query.data.split("#")
+    if key in PRO_DETAIL:
+        btn = [[InlineKeyboardButton("🌐  SELECT LANGUAGE", callback_data="ident")]]
+        items = list(LANGUAGES.items())
+        for i in range(0, len(items), 2):
+            name1, code1 = items[i]
+            row = [InlineKeyboardButton(name1, callback_data=f"fl#{code1}#{key}")]
+            if i + 1 < len(items):
+                name2, code2 = items[i + 1]
+                row.append(InlineKeyboardButton(name2, callback_data=f"fl#{code2}#{key}"))
+            btn.append(row)
+        btn.append(_pro_filter_back_row(key))
+        return await query.edit_message_reply_markup(InlineKeyboardMarkup(btn))
+
     search = FRESH.get(key)
     search = search.replace(' ', '_')
 
@@ -1209,6 +1286,14 @@ async def languages_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^fl#"))
 async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
     _, lang, key = query.data.split("#")
+    if key in PRO_DETAIL:
+        state = PRO_DETAIL[key]
+        base = state.get("title") or FRESH.get(key) or "Movie"
+        if lang == "homepage":
+            state["active_query"] = state.get("season_query") or base
+        else:
+            state["active_query"] = f"{base} {lang}"
+        return await _pro_render_filtered_detail(client, query, key, state["active_query"], keep_meta=True)
     curr_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
     search = FRESH.get(key)
     search = search.replace("_", " ")
@@ -1360,7 +1445,7 @@ async def seasons_cb_handler(client: Client, query: CallbackQuery):
                     callback_data=f"fs#s{season_numbers[i+1]:02d}#{key}"
                 ))
             btn.append(row)
-        btn.append([InlineKeyboardButton("↩ Back to Files", callback_data=f"mfilenext#{key}#0")])
+        btn.append([InlineKeyboardButton("↩ Back to Files", callback_data=f"mfilterback#{key}")])
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
         return await query.answer()
 
@@ -1398,6 +1483,7 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
         base_title = state.get("title") or FRESH.get(key) or "Movie"
         if season_tag == "homepage":
             state["season_number"] = None
+            state["season_query"] = None
             state["active_query"] = base_title
             state["meta"] = state.get("base_meta") or state.get("meta") or {}
         else:
@@ -1417,6 +1503,7 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
             if not files:
                 return await query.answer("🚫 No files found for this season.", show_alert=True)
             state["season_number"] = season_number
+            state["season_query"] = chosen_query
             state["active_query"] = chosen_query
             state["history"] = [0]
             state["meta"] = await _pro_get_season_meta(base_title, season_number, state.get("base_meta") or state.get("meta") or {})
