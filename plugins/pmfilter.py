@@ -1511,7 +1511,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
         try:
             user_id = query.from_user.id
             username = query.from_user.mention
-            log_msg = await client.send_cached_media(chat_id=LOG_CHANNEL, file_id=file_id,)
+            log_msg = await client.send_cached_media(chat_id=BIN_CHANNEL, file_id=file_id,)
             fileName = {quote_plus(get_name(log_msg))}
             dreamx_stream = f"{URL}watch/{str(log_msg.id)}/{quote_plus(get_name(log_msg))}?hash={get_hash(log_msg)}"
             dreamx_download = f"{URL}{str(log_msg.id)}/{quote_plus(get_name(log_msg))}?hash={get_hash(log_msg)}"
@@ -1565,40 +1565,8 @@ async def cb_handler(client: Client, query: CallbackQuery):
         await query.answer(text=script.SINFO, show_alert=True)
 
     elif query.data == "start":
-        buttons = [[
-                    InlineKeyboardButton('🔰 ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ 🔰', url=f'http://telegram.me/{temp.U_NAME}?startgroup=true')
-                ],[
-                    InlineKeyboardButton(' ʜᴇʟᴘ 📢', callback_data='help'),
-                    InlineKeyboardButton(' ᴀʙᴏᴜᴛ 📖', callback_data='about')
-                ],[
-                    InlineKeyboardButton('ᴛᴏᴘ sᴇᴀʀᴄʜɪɴɢ ⭐', callback_data="topsearch"),
-                     InlineKeyboardButton('ᴜᴘɢʀᴀᴅᴇ 🎟', callback_data="premium_info"),
-                ]]
-        reply_markup = InlineKeyboardMarkup(buttons)
-        current_time = datetime.now(pytz.timezone(TIMEZONE))
-        curr_time = current_time.hour
-        if curr_time < 12:
-            gtxt = "ɢᴏᴏᴅ ᴍᴏʀɴɪɴɢ 🌞"
-        elif curr_time < 17:
-            gtxt = "ɢᴏᴏᴅ ᴀғᴛᴇʀɴᴏᴏɴ 🌓"
-        elif curr_time < 21:
-            gtxt = "ɢᴏᴏᴅ ᴇᴠᴇɴɪɴɢ 🌘"
-        else:
-            gtxt = "ɢᴏᴏᴅ ɴɪɢʜᴛ 🌑"
-        try:
-            await client.edit_message_media(
-                query.message.chat.id,
-                query.message.id,
-                InputMediaPhoto(random.choice(PICS))
-            )
-        except Exception as e:
-            pass
-        await query.message.edit_text(
-            text=script.START_TXT.format(query.from_user.mention, gtxt, temp.U_NAME, temp.B_NAME),
-            reply_markup=reply_markup,
-            parse_mode=enums.ParseMode.HTML
-        )
-        await query.answer(MSG_ALRT)
+        from plugins.ui_pro import show_home
+        return await show_home(query)
 
     elif query.data == "donation":
         buttons = [[
@@ -1623,32 +1591,13 @@ async def cb_handler(client: Client, query: CallbackQuery):
         )
 
     elif query.data == "help":
-        buttons = [[
-            InlineKeyboardButton('⇋ ʙᴀᴄᴋ ᴛᴏ ʜᴏᴍᴇ ⇋', callback_data='start')
-        ]]
-        reply_markup = InlineKeyboardMarkup(buttons)
-        await query.message.edit_text(
-            text=script.HELP_TXT,
-            reply_markup=reply_markup,
-            parse_mode=enums.ParseMode.HTML
-        )
+        query.data = "ui_help"
+        from plugins.ui_pro import ui_help
+        return await ui_help(client, query)
 
     elif query.data == "about":
-        buttons = [[
-            InlineKeyboardButton('‼️ ᴅɪꜱᴄʟᴀɪᴍᴇʀ ‼️', callback_data='disclaimer'),
-            InlineKeyboardButton ('🪔 sᴏᴜʀᴄᴇ', callback_data='source'),
-        ],[
-            InlineKeyboardButton('ᴅᴏɴᴀᴛɪᴏɴ 💰', callback_data='donation'),
-        ],[
-            InlineKeyboardButton('⇋ ʙᴀᴄᴋ ᴛᴏ ʜᴏᴍᴇ ⇋', callback_data='start')
-        ]]
-        reply_markup = InlineKeyboardMarkup(buttons)
-        await query.message.edit_text(
-            text=script.ABOUT_TXT.format(temp.U_NAME, temp.B_NAME, OWNER_LNK),
-            reply_markup=reply_markup,
-            disable_web_page_preview=True,
-            parse_mode=enums.ParseMode.HTML
-        )
+        from plugins.ui_pro import ui_account
+        return await ui_account(client, query)
 
     elif query.data == "give_trial":
         try:
@@ -1686,7 +1635,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
 
     elif query.data == "source":
         buttons = [[
-            InlineKeyboardButton('Source Code 📜', url='https://t.me/TLK_Tinku_bro'),
+            InlineKeyboardButton('Owner', url=OWNER_LNK),
             InlineKeyboardButton('⇋ ʙᴀᴄᴋ ⇋', callback_data='about')
         ]]
         reply_markup = InlineKeyboardMarkup(buttons)
@@ -1718,7 +1667,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
                 InlineKeyboardButton('• ʀᴇꜰᴇʀ ꜰʀɪᴇɴᴅꜱ', callback_data='reffff'),
                 InlineKeyboardButton('ꜰʀᴇᴇ ᴛʀɪᴀʟ •', callback_data='give_trial')
             ],[
-                InlineKeyboardButton('⇋ ʙᴀᴄᴋ ᴛᴏ ʜᴏᴍᴇ ⇋', callback_data='start')
+                InlineKeyboardButton('Home', callback_data='start')
             ]]
             reply_markup = InlineKeyboardMarkup(btn)
             await client.edit_message_media(

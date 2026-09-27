@@ -98,16 +98,9 @@ async def start(client, message):
         await db.add_user(message.from_user.id, message.from_user.first_name)
         await client.send_message(LOG_CHANNEL, script.LOG_TEXT_P.format(message.from_user.id, message.from_user.mention))
     if len(message.command) != 2:
-        buttons = [[
-                    InlineKeyboardButton('Add to Group', url=f'http://t.me/{temp.U_NAME}?startgroup=true')
-                ],[
-                    InlineKeyboardButton('Help', callback_data='help'),
-                    InlineKeyboardButton('About', callback_data='about')
-                ],[
-                    InlineKeyboardButton('Top Search', callback_data="topsearch"),
-                    InlineKeyboardButton('Premium', callback_data="premium_info"),
-                ]]
-        reply_markup = InlineKeyboardMarkup(buttons)
+        from plugins.ui_pro import home_kb
+        buttons = None
+        reply_markup = home_kb()
         current_time = datetime.now(pytz.timezone(TIMEZONE))
         curr_time = current_time.hour        
         if curr_time < 12:
@@ -123,23 +116,16 @@ async def start(client, message):
         await m.delete()        
         await message.reply_photo(
             photo=random.choice(PICS),
-            caption=script.START_TXT.format(message.from_user.mention, gtxt, temp.U_NAME, temp.B_NAME),
+            caption=__import__("plugins.ui_pro", fromlist=["home_text"]).home_text(message.from_user.mention),
             reply_markup=reply_markup,
             parse_mode=enums.ParseMode.HTML
         )
         return
 
     if len(message.command) == 2 and message.command[1] in ["subscribe", "error", "okay", "help"]:
-        buttons = [[
-                    InlineKeyboardButton('Add to Group', url=f'http://t.me/{temp.U_NAME}?startgroup=true')
-                ],[
-                    InlineKeyboardButton('Help', callback_data='help'),
-                    InlineKeyboardButton('About', callback_data='about')
-                ],[
-                    InlineKeyboardButton('Top Search', callback_data="topsearch"),
-                    InlineKeyboardButton('Premium', callback_data="premium_info"),
-                ]]
-        reply_markup = InlineKeyboardMarkup(buttons)
+        from plugins.ui_pro import home_kb
+        buttons = None
+        reply_markup = home_kb()
         current_time = datetime.now(pytz.timezone(TIMEZONE))
         curr_time = current_time.hour        
         if curr_time < 12:
@@ -155,7 +141,7 @@ async def start(client, message):
         await m.delete()        
         await message.reply_photo(
             photo=random.choice(PICS),
-            caption=script.START_TXT.format(message.from_user.mention, gtxt, temp.U_NAME, temp.B_NAME),
+            caption=__import__("plugins.ui_pro", fromlist=["home_text"]).home_text(message.from_user.mention),
             reply_markup=reply_markup,
             parse_mode=enums.ParseMode.HTML
         )
