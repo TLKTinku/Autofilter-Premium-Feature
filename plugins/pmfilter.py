@@ -28,49 +28,48 @@ logger = logging.getLogger(__name__)
 
 
 def _pro_file_btn(file):
-    """Show only useful file identity: quality, language, episode/season, size."""
+    """Compact, useful file label: quality, language, episode/season, size."""
     name = clean_filename(getattr(file, "file_name", None) or "File")
+    raw = name.lower().replace("_", " ").replace(".", " ")
     size = get_size(getattr(file, "file_size", 0) or 0)
-    raw = name.lower().replace(" ", "")
 
     quality = ""
-    for tag, show in (
+    for tag, show in ((
         ("2160p", "4K"), ("4k", "4K"), ("1440p", "1440P"),
         ("1080p", "1080P"), ("720p", "720P"), ("480p", "480P"), ("360p", "360P"),
-    ):
+    )):
         if tag in raw:
             quality = show
             break
 
-    # Prefer explicit audio/language tags; fall back to the project's detector.
-    found = []
-    for pattern, label in (
-        (r"multi[ ._-]?audio", "Multi Audio"),
-        (r"dual[ ._-]?audio", "Dual Audio"),
-        (r"hindi", "Hindi"), (r"english", "English"), (r"tamil", "Tamil"),
-        (r"telugu", "Telugu"), (r"malayalam", "Malayalam"), (r"kannada", "Kannada"),
-        (r"bengali", "Bengali"), (r"marathi", "Marathi"), (r"punjabi", "Punjabi"),
-        (r"gujarati", "Gujarati"), (r"korean", "Korean"), (r"japanese", "Japanese"),
-    ):
-        if re.search(pattern, name, re.I) and label not in found:
-            found.append(label)
-    if not found:
-        try:
-            detected = extract_language(name)
-            found = [x.strip().lstrip("#") for x in str(detected).split(",")
-                     if x.strip() and "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ" not in x]
-        except Exception:
-            found = []
-    language = " • ".join(found) if found else "Language N/A"
+    # Prefer an exact episode token; otherwise show season when present.
+    episode = ""
+    m = re.search(r"\bS(?:0?\d{1,2})\s*E(?:0?\d{1,3})\b", raw, re.I)
+    if m:
+        token = re.sub(r"\s+", "", m.group(0)).upper()
+        sm = re.search(r"S(\d+)", token)
+        em = re.search(r"E(\d+)", token)
+        episode = f"S{int(sm.group(1)):02d}E{int(em.group(1)):02d}" if sm and em else token
+    else:
+        m = re.search(r"\bS(?:eason\s*)?(0?\d{1,2})\b", raw, re.I)
+        if m:
+            episode = f"S{int(m.group(1)):02d}"
 
-    # Keep episode/season identity when the file belongs to a series.
-    ep = re.search(r"\bS\d{1,2}(?:E\d{1,3})?\b", name, re.I)
-    if not ep:
-        ep = re.search(r"\bE\d{1,3}\b", name, re.I)
-    marker = ep.group(0).upper() if ep else ""
+    # Detect common language tags without exposing the long filename.
+    langs = []
+    language_map = (
+        ("hindi", "Hindi"), ("english", "English"), ("tamil", "Tamil"),
+        ("telugu", "Telugu"), ("malayalam", "Malayalam"), ("kannada", "Kannada"),
+        ("punjabi", "Punjabi"), ("gujarati", "Gujarati"), ("marathi", "Marathi"),
+        ("bengali", "Bengali"), ("multi audio", "Multi Audio"), ("dual audio", "Dual Audio"),
+    )
+    for token, label in language_map:
+        if token in raw and label not in langs:
+            langs.append(label)
+    language = "/".join(langs[:2])
 
-    parts = [x for x in (quality or "FILE", language, marker, size) if x]
-    return " • ".join(parts)
+    parts = [x for x in (quality, language, episode, size) if x]
+    return "•".join(parts) if parts else size
 
 logger.setLevel(logging.ERROR)
 
@@ -232,7 +231,7 @@ def _pro_detail_markup(key, files, next_offset, total_results, req):
 
     nav = []
     if next_offset != "":
-        nav.append(InlineKeyboardButton("Next ›", callback_data=f"next_{req}_{key}_{next_offset}"))
+        nav.append(InlineKeyboardButton("Next ›", callback_data=f"mfilenext#{key}#{next_offset}"))
     if nav:
         rows.append(nav)
     rows.append([
@@ -528,6 +527,7 @@ async def _pro_show_movie(client, query, key, index):
         "history": [0],
         "meta": None,
         "season_number": None,
+        "user_id": query.from_user.id if query.from_user else 0,
     }
     await _pro_render_detail(client, query, detail_key, 0, push_history=False)
 
@@ -680,6 +680,22 @@ async def pro_movie_files_previous_page(bot, query):
     history.pop()
     previous_offset = history[-1]
     return await _pro_render_detail(bot, query, key, previous_offset, push_history=False)
+
+
+@Client.on_callback_query(filters.regex(r"^mfilenext#"))
+async def pro_movie_files_next_page(bot, query):
+    """Phase-3-only file pagination; never enters the legacy renderer."""
+    try:
+        _, key, raw_offset = query.data.split("#", 2)
+        offset = int(raw_offset)
+    except (ValueError, TypeError):
+        return await query.answer("⚠️ Invalid page.", show_alert=True)
+    if key not in PRO_DETAIL:
+        return await query.answer("⚠️ This movie page has expired.", show_alert=True)
+    state = PRO_DETAIL[key]
+    if state.get("user_id") not in (None, 0, query.from_user.id):
+        return await query.answer("⚠️ This is not your movie request.", show_alert=True)
+    return await _pro_render_detail(bot, query, key, offset, push_history=True)
 
 
 @Client.on_callback_query(filters.regex(r"^next"))
@@ -1284,7 +1300,7 @@ async def seasons_cb_handler(client: Client, query: CallbackQuery):
                     callback_data=f"fs#s{season_numbers[i+1]:02d}#{key}"
                 ))
             btn.append(row)
-        btn.append([InlineKeyboardButton("↩ Back to Files", callback_data=f"next_{req}_{key}_0")])
+        btn.append([InlineKeyboardButton("↩ Back to Files", callback_data=f"mfilenext#{key}#0")])
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
         return await query.answer()
 
