@@ -69,6 +69,18 @@ PRO_DETAIL = {}          # detail_key -> movie detail state
 PRO_SCAN_BATCH = 40      # DB records per discovery batch
 PRO_MAX_SCAN = 400       # hard upper bound on discovery work per search
 PRO_TITLE_PAGE = 10      # movie titles shown per page
+PRO_MAX_STATES = 100     # bounded UI state; keeps Render RAM predictable
+
+
+def _pro_trim_state_caches():
+    """Bound UI-only state dictionaries so searches cannot grow forever."""
+    for cache in (PRO_SEARCH, PRO_DETAIL):
+        while len(cache) > PRO_MAX_STATES:
+            try:
+                cache.pop(next(iter(cache)))
+            except StopIteration:
+                break
+
 
 _PRO_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 _PRO_NOISE_RE = re.compile(
@@ -242,6 +254,7 @@ async def _pro_show_movie(query, key, index):
     temp.GETALL[detail_key] = files
     temp.SHORT[query.from_user.id] = query.message.chat.id
     PRO_DETAIL[detail_key] = {"search_key": key, "title": title, "history": [0]}
+    _pro_trim_state_caches()
 
     detail_caption = (
         f"╭━━━━━━━━━━━━━━━━━━━━╮\n"
@@ -2286,6 +2299,7 @@ async def auto_filter(client, msg, spoll=False):
                 "group_next_offset": group_next_offset,
                 "total_results": total_results,
             }
+            _pro_trim_state_caches()
 
         if settings.get('button'):
             btn = [
