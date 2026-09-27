@@ -17,6 +17,7 @@ from database.refer import referdb
 from database.users_chats_db import db
 import asyncio
 import re
+import aiohttp
 import math
 import random
 import pytz
@@ -27,28 +28,50 @@ logger = logging.getLogger(__name__)
 
 
 def _pro_file_btn(file):
-    """Compact Phase-3 file button: quality • language • size."""
+    """Show only useful file identity: quality, language, episode/season, size."""
     name = clean_filename(getattr(file, "file_name", None) or "File")
     size = get_size(getattr(file, "file_size", 0) or 0)
     raw = name.lower().replace(" ", "")
-    qual = ""
+
+    quality = ""
     for tag, show in (
         ("2160p", "4K"), ("4k", "4K"), ("1440p", "1440P"),
         ("1080p", "1080P"), ("720p", "720P"), ("480p", "480P"), ("360p", "360P"),
     ):
         if tag in raw:
-            qual = show
+            quality = show
             break
-    if "multiaudio" in raw or "dualaudio" in raw or "dualaudio" in raw:
-        lang = "Multi Audio"
-    else:
+
+    # Prefer explicit audio/language tags; fall back to the project's detector.
+    found = []
+    for pattern, label in (
+        (r"multi[ ._-]?audio", "Multi Audio"),
+        (r"dual[ ._-]?audio", "Dual Audio"),
+        (r"hindi", "Hindi"), (r"english", "English"), (r"tamil", "Tamil"),
+        (r"telugu", "Telugu"), (r"malayalam", "Malayalam"), (r"kannada", "Kannada"),
+        (r"bengali", "Bengali"), (r"marathi", "Marathi"), (r"punjabi", "Punjabi"),
+        (r"gujarati", "Gujarati"), (r"korean", "Korean"), (r"japanese", "Japanese"),
+    ):
+        if re.search(pattern, name, re.I) and label not in found:
+            found.append(label)
+    if not found:
         try:
-            lang = extract_language(name) or "Language N/A"
+            detected = extract_language(name)
+            found = [x.strip().lstrip("#") for x in str(detected).split(",")
+                     if x.strip() and "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ" not in x]
         except Exception:
-            lang = "Language N/A"
-        if not lang or str(lang).upper() in {"N/A", "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ"}:
-            lang = "Language N/A"
-    return f"{qual or 'FILE'} • {lang} • {size}"
+            found = []
+    language = " • ".join(found) if found else "Language N/A"
+
+    # Keep episode/season identity when the file belongs to a series.
+    ep = re.search(r"\bS\d{1,2}(?:E\d{1,3})?\b", name, re.I)
+    if not ep:
+        ep = re.search(r"\bE\d{1,3}\b", name, re.I)
+    marker = ep.group(0).upper() if ep else ""
+
+    parts = [x for x in (quality or "FILE", language, marker, size) if x]
+    return " • ".join(parts)
+
 logger.setLevel(logging.ERROR)
 
 tracemalloc.start()
@@ -87,12 +110,26 @@ _PRO_SOURCE_RE = re.compile(r"^(?:toonflex|moviezzclub|ssfilms|yts)[\s._-]+", re
 
 
 def _pro_group_title(file_name):
-    """Make a stable display title; never alter the stored filename."""
+    """Create a title-level identity without merging different episodes."""
     name = re.sub(r"\.[A-Za-z0-9]{1,8}$", "", clean_filename(file_name or "File"))
     name = re.sub(r"[._]+", " ", name)
     name = re.sub(r"\[[^\]]*\]", " ", name)
     name = re.sub(r"\s+", " ", name).strip()
     name = _PRO_SOURCE_RE.sub("", name).strip(" -._")
+
+    # Series identity must win over year detection.  The old code stopped at
+    # the year first, turning every S01E01/S01E02 file into one big "2024" group.
+    season_ep = re.search(r"\bS\d{1,2}(?:E\d{1,3})?\b", name, re.I)
+    episode = re.search(r"\bE\d{1,3}\b", name, re.I) if not season_ep else None
+    if season_ep or episode:
+        marker = (season_ep or episode).group(0).upper()
+        base = name[:(season_ep or episode).start()].strip(" -._")
+        # If the marker occurs before a year, keep the year as part of the base.
+        if not base:
+            base = name
+        base = re.sub(r"\b(?:part|cd|disc|disk)\s*\d{1,3}\b", "", base, flags=re.I)
+        base = re.sub(r"\s+", " ", base).strip(" -._")
+        return f"{base.title()} {marker}".strip()
 
     year = _PRO_YEAR_RE.search(name)
     if year:
@@ -100,11 +137,9 @@ def _pro_group_title(file_name):
     else:
         name = _PRO_NOISE_RE.sub("", name)
 
-    # Remove trailing copy/disc/part numbers: "Movie 2012 1" -> "Movie 2012".
     name = re.sub(r"\s+(?:(?:part|cd|disc|disk)\s*)?\d{1,3}$", "", name, flags=re.I)
     name = re.sub(r"\s+", " ", name).strip(" -._")
     return name.title() or "Untitled"
-
 
 def _pro_group_key(title):
     return re.sub(r"[^a-z0-9]+", "", (title or "").lower())
@@ -238,8 +273,72 @@ def _pro_search_caption(state):
     )
 
 
-def _pro_detail_caption(title, total, meta, files):
-    safe_title = _html_escape(str(meta.get("title") or title or "Movie"))
+async def _pro_get_season_meta(base_title, season_number, fallback_meta=None):
+    """Fetch season-specific TMDB poster/details, with series metadata fallback.
+    Uses one search + one season endpoint call and never downloads the image itself.
+    """
+    fallback_meta = dict(fallback_meta or {})
+    if not TMDB_API_KEY:
+        return fallback_meta
+    try:
+        base = str(base_title or "").strip()
+        year_match = re.search(r"\b(?:19|20)\d{2}\b", base)
+        year = year_match.group(0) if year_match else None
+        clean = re.sub(r"\b(?:19|20)\d{2}\b", "", base)
+        clean = re.sub(r"\s+", " ", clean).strip(" -")
+        if not clean:
+            clean = base
+        async with aiohttp.ClientSession() as session:
+            params = {"api_key": TMDB_API_KEY, "query": clean, "include_adult": "false"}
+            if year:
+                params["first_air_date_year"] = year
+            async with session.get("https://api.themoviedb.org/3/search/tv", params=params, timeout=8) as resp:
+                if resp.status != 200:
+                    return fallback_meta
+                data = await resp.json()
+            results = data.get("results") or []
+            if not results:
+                return fallback_meta
+            tv = results[0]
+            tv_id = tv.get("id")
+            if not tv_id:
+                return fallback_meta
+            season_url = f"https://api.themoviedb.org/3/tv/{tv_id}/season/{int(season_number)}"
+            async with session.get(season_url, params={"api_key": TMDB_API_KEY}, timeout=8) as resp:
+                if resp.status != 200:
+                    return fallback_meta
+                season = await resp.json()
+
+        poster_path = season.get("poster_path")
+        backdrop_path = season.get("backdrop_path")
+        meta = dict(fallback_meta)
+        meta.update({
+            "title": tv.get("name") or meta.get("title") or base,
+            "year": (season.get("air_date") or tv.get("first_air_date") or "")[:4] or meta.get("year"),
+            "rating": str(season.get("vote_average") or tv.get("vote_average") or meta.get("rating") or "N/A"),
+            "runtime": meta.get("runtime") or "N/A",
+            "genres": meta.get("genres") or "N/A",
+            "poster": f"https://image.tmdb.org/t/p/w780{poster_path}" if poster_path else meta.get("poster"),
+            "backdrop": f"https://image.tmdb.org/t/p/w1280{backdrop_path}" if backdrop_path else meta.get("backdrop"),
+            "season_number": int(season_number),
+            "episode_count": season.get("episode_count") or 0,
+            "air_date": season.get("air_date") or "",
+        })
+        return meta
+    except Exception as exc:
+        logger.debug("Season metadata lookup failed: %s", exc)
+        return fallback_meta
+
+
+def _pro_detail_display_title(state, meta, fallback_title):
+    season_number = state.get("season_number")
+    base = str(meta.get("title") or fallback_title or "Movie")
+    if season_number:
+        return f"{base} — Season {int(season_number)}"
+    return base
+
+def _pro_detail_caption(title, total, meta, files, display_title=None):
+    safe_title = _html_escape(str(display_title or meta.get("title") or title or "Movie"))
     year = meta.get("year") or "N/A"
     rating = meta.get("rating") or "N/A"
     genres = meta.get("genres") or "N/A"
@@ -275,21 +374,25 @@ async def _pro_show_search(client, query, key):
         return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
     caption = _pro_search_caption(state)
     state["caption"] = caption
-    # Back from a detail photo must return to a clean text-only search page.
-    if getattr(query.message, "photo", None) or getattr(query.message, "video", None) or getattr(query.message, "animation", None):
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-        await client.send_message(
-            chat_id=query.message.chat.id,
-            text=caption,
-            reply_markup=_pro_search_markup(state),
-            disable_web_page_preview=True,
-            parse_mode=enums.ParseMode.HTML,
+    # Keep the search poster while paging and when returning from a movie.
+    if getattr(query.message, "photo", None):
+        await query.message.edit_caption(
+            caption=caption, reply_markup=_pro_search_markup(state),
+            parse_mode=enums.ParseMode.HTML
         )
     else:
-        await _pro_edit_caption_or_text(query.message, caption, _pro_search_markup(state))
+        poster = (state.get("meta") or {}).get("poster") or (state.get("meta") or {}).get("backdrop")
+        if poster:
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+            await client.send_photo(
+                chat_id=query.message.chat.id, photo=poster, caption=caption,
+                reply_markup=_pro_search_markup(state), parse_mode=enums.ParseMode.HTML
+            )
+        else:
+            await _pro_edit_caption_or_text(query.message, caption, _pro_search_markup(state))
     await query.answer()
 
 
@@ -303,13 +406,14 @@ async def _pro_render_detail(client, query, key, offset=0, push_history=True):
     except (TypeError, ValueError):
         offset = 0
 
+    active_query = state.get("active_query") or title
     files, next_offset, total = await get_search_results(
-        query.message.chat.id, title, offset=offset, filter=True
+        query.message.chat.id, active_query, offset=offset, filter=True
     )
     if not files:
         return await query.answer("🚫 No files found for this page.", show_alert=True)
 
-    FRESH[key] = title
+    FRESH[key] = active_query
     temp.GETALL[key] = files
     temp.SHORT[query.from_user.id] = query.message.chat.id
     if push_history:
@@ -327,8 +431,11 @@ async def _pro_render_detail(client, query, key, offset=0, push_history=True):
         except Exception:
             meta = None
         state["meta"] = meta or {}
+        state.setdefault("base_meta", dict(state["meta"]))
 
-    caption = _pro_detail_caption(title, total, state.get("meta") or {}, files)
+    meta = state.get("meta") or {}
+    display_title = _pro_detail_display_title(state, meta, title)
+    caption = _pro_detail_caption(title, total, meta, files, display_title=display_title)
     markup = _pro_detail_markup(key, files, next_offset, total, query.from_user.id)
     history = state.get("history", [0])
     if len(history) > 1:
@@ -337,6 +444,29 @@ async def _pro_render_detail(client, query, key, offset=0, push_history=True):
         ])
 
     # First visit: create a real poster message. Later pages: edit its caption/buttons.
+    desired_poster = (state.get("meta") or {}).get("poster") or (state.get("meta") or {}).get("backdrop")
+    current_poster = None
+    try:
+        if getattr(query.message, "photo", None):
+            current_poster = query.message.photo.file_id if query.message.photo else None
+    except Exception:
+        current_poster = None
+
+    # If the detail is already a photo message and the selected season has a
+    # different poster URL, replace the media instead of leaving the old poster.
+    if getattr(query.message, "photo", None) and desired_poster and state.get("poster_url") != desired_poster:
+        try:
+            await query.message.edit_media(
+                InputMediaPhoto(media=desired_poster, caption=caption, parse_mode=enums.ParseMode.HTML),
+                reply_markup=markup
+            )
+            state["poster_url"] = desired_poster
+            state["message_id"] = query.message.id
+            await query.answer()
+            return
+        except Exception:
+            pass
+
     if state.get("message_id") != getattr(query.message, "id", None) or not getattr(query.message, "photo", None):
         # If the current message is the old search text, remove it and replace it with the detail poster.
         if not getattr(query.message, "photo", None):
@@ -366,8 +496,10 @@ async def _pro_render_detail(client, query, key, offset=0, push_history=True):
                     parse_mode=enums.ParseMode.HTML,
                 )
             state["message_id"] = sent.id
+            state["poster_url"] = poster
         else:
             state["message_id"] = query.message.id
+            state["poster_url"] = desired_poster
     else:
         await _pro_edit_caption_or_text(query.message, caption, markup)
     await query.answer()
@@ -389,7 +521,14 @@ async def _pro_show_movie(client, query, key, index):
     detail_key = f"{key}:m{index}"
     FRESH[detail_key] = title
     BUTTONS.pop(detail_key, None)
-    PRO_DETAIL[detail_key] = {"search_key": key, "title": title, "history": [0], "meta": None}
+    PRO_DETAIL[detail_key] = {
+        "search_key": key,
+        "title": title,
+        "active_query": title,
+        "history": [0],
+        "meta": None,
+        "season_number": None,
+    }
     await _pro_render_detail(client, query, detail_key, 0, push_history=False)
 
 
@@ -528,27 +667,6 @@ async def refercall(bot, query):
         parse_mode=enums.ParseMode.HTML
     )
     await query.answer()
-
-@Client.on_callback_query(filters.regex(r"^next"))
-async def pro_movie_files_next_page(bot, query):
-    """Phase-3 next handler. Keeps the poster/title/details layout."""
-    try:
-        parts = query.data.split("_", 3)
-        if len(parts) != 4:
-            return
-        _, req, key, offset = parts
-    except Exception:
-        return
-    if key not in PRO_DETAIL:
-        return await next_page(bot, query)
-    if int(req) not in [query.from_user.id, 0]:
-        return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
-    try:
-        offset_int = int(offset)
-    except (TypeError, ValueError):
-        offset_int = 0
-    return await _pro_render_detail(bot, query, key, offset_int, push_history=True)
-
 
 @Client.on_callback_query(filters.regex(r"^mfileprev#"))
 async def pro_movie_files_previous_page(bot, query):
@@ -1139,8 +1257,38 @@ async def seasons_cb_handler(client: Client, query: CallbackQuery):
     except Exception:
         pass
     _, key = query.data.split("#")
-    search = FRESH.get(key).replace(" ", "_")
+
     req = query.from_user.id
+
+    # Phase 3: on a PRO movie page, Season is a real detail-state selector.
+    # It does not reuse the legacy reply-markup-only flow because that would
+    # leave the old poster and title on screen.
+    if key in PRO_DETAIL:
+        btn: list[list[InlineKeyboardButton]] = [[
+            InlineKeyboardButton("⇊ SELECT SEASON ⇊", callback_data="ident")
+        ]]
+        season_numbers = []
+        for raw in SEASONS:
+            try:
+                season_numbers.append(int(str(raw).lstrip("S")))
+            except Exception:
+                continue
+        for i in range(0, len(season_numbers), 2):
+            row = [InlineKeyboardButton(
+                f"📺 Season {season_numbers[i]}",
+                callback_data=f"fs#s{season_numbers[i]:02d}#{key}"
+            )]
+            if i + 1 < len(season_numbers):
+                row.append(InlineKeyboardButton(
+                    f"📺 Season {season_numbers[i+1]}",
+                    callback_data=f"fs#s{season_numbers[i+1]:02d}#{key}"
+                ))
+            btn.append(row)
+        btn.append([InlineKeyboardButton("↩ Back to Files", callback_data=f"next_{req}_{key}_0")])
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
+        return await query.answer()
+
+    search = FRESH.get(key).replace(" ", "_")
     offset = 0
     btn: list[list[InlineKeyboardButton]] = []
     for i in range(0, len(SEASONS) - 1, 2):
@@ -1165,8 +1313,46 @@ async def seasons_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^fs#"))
 async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
     _, season_tag, key = query.data.split("#")
-    search = FRESH.get(key).replace("_", " ")
     season_tag = season_tag.lower()
+
+    # Phase 3: season selection on a movie detail page. Fetch only the selected
+    # season's files and swap to a season-specific TMDB poster when available.
+    if key in PRO_DETAIL:
+        state = PRO_DETAIL[key]
+        base_title = state.get("title") or FRESH.get(key) or "Movie"
+        if season_tag == "homepage":
+            state["season_number"] = None
+            state["active_query"] = base_title
+            state["meta"] = state.get("base_meta") or state.get("meta") or {}
+        else:
+            try:
+                season_number = int(re.search(r"\d+", season_tag).group(0))
+            except Exception:
+                return await query.answer("⚠️ Invalid season.", show_alert=True)
+            variations = generate_season_variations(base_title, season_number)
+            files = []
+            chosen_query = variations[0] if variations else f"{base_title} s{season_number:02d}"
+            for candidate in variations:
+                found, _, _ = await get_search_results(query.message.chat.id, candidate, offset=0, filter=True)
+                if found:
+                    files = found
+                    chosen_query = candidate
+                    break
+            if not files:
+                return await query.answer("🚫 No files found for this season.", show_alert=True)
+            state["season_number"] = season_number
+            state["active_query"] = chosen_query
+            state["history"] = [0]
+            state["meta"] = await _pro_get_season_meta(base_title, season_number, state.get("base_meta") or state.get("meta") or {})
+            FRESH[key] = chosen_query
+            temp.GETALL[key] = files
+            # Render the same detail message immediately with the new poster.
+            state["message_id"] = query.message.id
+            await _pro_render_detail(client, query, key, 0, push_history=False)
+            return
+
+    search = FRESH.get(key).replace("_", " ")
+
     if season_tag == "homepage":
         search_final = search
         query_input = search_final
@@ -2349,6 +2535,7 @@ async def auto_filter(client, msg, spoll=False):
                 "user_id": message.from_user.id if message.from_user else 0,
                 "group_next_offset": group_next_offset,
                 "total_results": total_results,
+                "meta": None,
             }
 
         if settings.get('button'):
@@ -2505,13 +2692,14 @@ async def auto_filter(client, msg, spoll=False):
         # Phase-3 title-first UI: clean text-only search page.
         is_pro_search = settings.get('button') and key in PRO_SEARCH
         if is_pro_search:
+            PRO_SEARCH[key]["meta"] = imdb or {}
             PRO_SEARCH[key]["caption"] = _pro_search_caption(PRO_SEARCH[key])
             cap = PRO_SEARCH[key]["caption"]
             btn = _pro_search_markup(PRO_SEARCH[key])
 
         sent = None
         try:
-            if imdb and imdb.get('poster') and not is_pro_search:
+            if imdb and imdb.get('poster'):
                 try:
                     if TMDB_POSTER:
                         photo = imdb.get('backdrop') if imdb.get('backdrop') and LANDSCAPE_POSTER else imdb.get('poster')
