@@ -8,6 +8,8 @@ import asyncio
 import string
 import pytz
 from .pmfilter import auto_filter 
+# Register MY MOVIES UI callback handlers during bot startup.
+from plugins import ui_pro as _ui_pro_bootstrap
 from Script import script
 from datetime import datetime
 from database.refer import referdb
@@ -28,6 +30,18 @@ logger = logging.getLogger(__name__)
 
 TIMEZONE = "Asia/Kolkata"
 BATCH_FILES = {}
+
+
+def _valid_button_url(value):
+    """Return a URL safe for Telegram InlineKeyboardButton.url, or None."""
+    value = str(value or "").strip()
+    if not value:
+        return None
+    if not (value.startswith("https://") or value.startswith("http://") or value.startswith("tg://")):
+        return None
+    if any(ch in value for ch in "\r\n\t"):
+        return None
+    return value
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
@@ -283,11 +297,24 @@ async def start(client, message):
                     howtodownload = settings.get('tutorial_3', TUTORIAL_3)
                 else:
                     howtodownload = settings.get('tutorial_2', TUTORIAL_2) if is_second_shortener else settings.get('tutorial', TUTORIAL)
+
+                # Telegram rejects an InlineKeyboardButton when ANY url is empty/malformed.
+                # The shortener URL can be valid while the optional tutorial URL is blank.
+                verify_url = _valid_button_url(verify)
+                tutorial_url = _valid_button_url(howtodownload)
+                if not verify_url:
+                    print(f"WARNING: verification URL rejected locally: {verify!r}")
+                    verify_url = raw_link
+
                 buttons = [[
-                    InlineKeyboardButton(text="♻️ ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴠᴇʀɪꜰʏ ♻️", url=verify)
-                ],[
-                    InlineKeyboardButton(text="⁉️ ʜᴏᴡ ᴛᴏ ᴠᴇʀɪꜰʏ ⁉️", url=howtodownload)
+                    InlineKeyboardButton(text="♻️ ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴠᴇʀɪꜰʏ ♻️", url=verify_url)
                 ]]
+                if tutorial_url:
+                    buttons.append([
+                        InlineKeyboardButton(text="⁉️ ʜᴏᴡ ᴛᴏ ᴠᴇʀɪꜰʏ ⁉️", url=tutorial_url)
+                    ])
+                else:
+                    print(f"INFO: tutorial URL is empty/invalid; hiding tutorial button: {howtodownload!r}")
                 reply_markup=InlineKeyboardMarkup(buttons)
                 if await db.user_verified(user_id): 
                     msg = script.THIRDT_VERIFICATION_TEXT

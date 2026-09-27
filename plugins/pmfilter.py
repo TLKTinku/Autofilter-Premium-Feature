@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def _pro_file_btn(file):
-    """Compact, useful file label: quality, language, episode/season, size."""
+    """Readable cinematic file label; never expose the raw filename."""
     name = clean_filename(getattr(file, "file_name", None) or "File")
     caption = getattr(file, "caption", "") or ""
     raw = f"{name} {caption}".lower().replace("_", " ").replace(".", " ")
@@ -39,38 +39,34 @@ def _pro_file_btn(file):
         ("2160p", "4K"), ("4k", "4K"), ("1440p", "1440P"),
         ("1080p", "1080P"), ("720p", "720P"), ("480p", "480P"), ("360p", "360P"),
     )):
-        if tag in raw:
+        if re.search(rf"(?<!\d){re.escape(tag)}(?!\d)", raw, re.I):
             quality = show
             break
 
-    # Prefer an exact episode token; otherwise show season when present.
     episode = ""
     m = re.search(r"\bS(?:0?\d{1,2})\s*E(?:0?\d{1,3})\b", raw, re.I)
     if m:
-        token = re.sub(r"\s+", "", m.group(0)).upper()
-        sm = re.search(r"S(\d+)", token)
-        em = re.search(r"E(\d+)", token)
-        episode = f"S{int(sm.group(1)):02d}E{int(em.group(1)):02d}" if sm and em else token
-    else:
-        m = re.search(r"\bS(?:eason\s*)?(0?\d{1,2})\b", raw, re.I)
-        if m:
-            episode = f"S{int(m.group(1)):02d}"
+        nums = re.findall(r"\d+", m.group(0))
+        if len(nums) >= 2:
+            episode = f"S{int(nums[0]):02d}E{int(nums[1]):02d}"
 
-    # Detect common language tags without exposing the long filename.
     langs = []
     language_map = (
-        ("hindi", "Hindi"), ("english", "English"), ("tamil", "Tamil"),
-        ("telugu", "Telugu"), ("malayalam", "Malayalam"), ("kannada", "Kannada"),
-        ("punjabi", "Punjabi"), ("gujarati", "Gujarati"), ("marathi", "Marathi"),
-        ("bengali", "Bengali"), ("multi audio", "Multi Audio"), ("dual audio", "Dual Audio"),
+        ("hindi", "Hindi"), ("english", "English"), ("japanese", "Japanese"),
+        ("tamil", "Tamil"), ("telugu", "Telugu"), ("malayalam", "Malayalam"),
+        ("kannada", "Kannada"), ("punjabi", "Punjabi"), ("gujarati", "Gujarati"),
+        ("marathi", "Marathi"), ("bengali", "Bengali"),
+        ("multi audio", "Multi Audio"), ("dual audio", "Dual Audio"),
     )
     for token, label in language_map:
-        if token in raw and label not in langs:
+        if re.search(rf"\b{re.escape(token)}\b", raw, re.I) and label not in langs:
             langs.append(label)
-    language = "/".join(langs[:2])
+    language = " / ".join(langs[:2])
 
+    # Movies:  🎞 720P • Hindi • 1.17 GB
+    # Series:  🎞 720P • Hindi • S01E02 • 1.17 GB
     parts = [x for x in (quality, language, episode, size) if x]
-    return "  •  ".join(parts) if parts else size
+    return "🎞 " + " • ".join(parts) if parts else f"🎞 {size}"
 
 logger.setLevel(logging.ERROR)
 
@@ -233,9 +229,9 @@ def _pro_detail_markup(key, files, next_offset, total_results, req):
             InlineKeyboardButton("📦 Send All", callback_data=f"sendfiles#{key}"),
         ],
         [
-            InlineKeyboardButton("🎚 Quality", callback_data=f"qualities#{key}"),
-            InlineKeyboardButton("🌐 Language", callback_data=f"languages#{key}"),
-            InlineKeyboardButton("📺 Season", callback_data=f"seasons#{key}"),
+            InlineKeyboardButton("🎚 Quality", callback_data=f"mmq#{key}"),
+            InlineKeyboardButton("🌐 Language", callback_data=f"mml#{key}"),
+            InlineKeyboardButton("📺 Season", callback_data=f"mms#{key}"),
         ],
     ]
 
@@ -363,69 +359,70 @@ def _pro_meta_text(value, fallback=""):
 def _pro_detail_caption(title, total, meta, files, display_title=None, offset=0):
     meta = meta or {}
     safe_title = _html_escape(str(display_title or meta.get("title") or title or "Movie").strip())
-    year = _pro_meta_text(meta.get("year"))
-    rating = _pro_meta_text(meta.get("rating"))
-    genres = _pro_meta_text(meta.get("genres"))
-    runtime = _pro_meta_text(meta.get("runtime"))
+
+    def clean_meta(v):
+        if isinstance(v, (list, tuple)):
+            v = " • ".join(str(x).strip() for x in v if str(x).strip())
+        v = str(v or "").strip()
+        if v.upper() in {"N/A", "NA", "NONE", "NULL", "NOT AVAILABLE"}:
+            return ""
+        return v
+
+    rating = clean_meta(meta.get("rating"))
+    rating = re.sub(r"\s*/\s*10\s*$", "", rating)
+    genres = clean_meta(meta.get("genres"))
+    runtime = clean_meta(meta.get("runtime"))
+    runtime = re.sub(r"\s*min(?:utes)?\.?\s*$", "", runtime, flags=re.I)
+    if runtime:
+        runtime = f"{runtime} min"
+
     combined = " ".join(
         f"{getattr(f, 'file_name', '')} {getattr(f, 'caption', '') or ''}" for f in (files or [])
     )
     try:
-        detected = extract_language(combined) if combined else ""
+        languages = clean_meta(extract_language(combined) if combined else "")
     except Exception:
-        detected = ""
-    languages = _pro_meta_text(detected)
+        languages = ""
     if not languages:
-        languages = _pro_meta_text(meta.get("languages"))
+        languages = clean_meta(meta.get("languages"))
+    if isinstance(languages, str):
+        languages = languages.replace(",", " • ")
 
-    kind = str(meta.get("kind") or "").lower()
-    is_series = bool(meta.get("season_number")) or any(x in kind for x in ("series", "tv", "show"))
-    icon = "📺" if is_series else "🎬"
+    is_series = bool(meta.get("season_number")) or "series" in str(meta.get("kind") or "").lower() or "tv" in str(meta.get("kind") or "").lower()
     heading = "SERIES" if is_series else "MOVIE"
 
-    info_lines = []
-    if year:
-        info_lines.append(f"📅 { _html_escape(year) }")
+    lines = [
+        "╭━━━━━━━━━━━━━━━━━━━━━━╮",
+        f"        🎬 <b>{heading}</b>",
+        "╰━━━━━━━━━━━━━━━━━━━━━━╯",
+        "",
+        f"       <b>{safe_title}</b>",
+        "",
+    ]
     if rating:
-        rating_text = str(rating).strip()
-        if not rating_text.lower().endswith("/10"):
-            rating_text += "/10"
-        info_lines.append(f"⭐ <b>{_html_escape(rating_text)}</b>")
+        lines.append(f"⭐ { _html_escape(rating) }/10")
     if genres:
-        info_lines.append(f"🎭 {_html_escape(genres)}")
+        lines.append(f"🎭 {_html_escape(genres)}")
     if runtime:
-        info_lines.append(f"⏱ {_html_escape(runtime)}")
+        lines.append(f"⏱ {_html_escape(runtime)}")
     if languages:
-        info_lines.append(f"🌐 {_html_escape(languages)}")
+        lines.append(f"🌐 {_html_escape(languages)}")
     if meta.get("season_number"):
         season_no = int(meta["season_number"])
         ep_count = int(meta.get("episode_count") or 0)
         season_line = f"📺 Season {season_no:02d}"
         if ep_count:
-            season_line += f"  •  {ep_count} episodes"
-        info_lines.append(season_line)
+            season_line += f" • {ep_count} episodes"
+        lines.append(season_line)
 
-    page_size = max(1, len(files or []))
-    page_no = int(offset // page_size) + 1 if page_size else 1
-    total_text = f"{int(total)} files" if total else "Files available"
-
-    body = [
-        "╭────────────────────────╮",
-        f"│      {icon} <b>{heading}</b>       │",
-        "╰────────────────────────╯",
-        "",
-        f"<b>{safe_title}</b>",
-    ]
-    if info_lines:
-        body.extend(["", *info_lines])
-    body.extend([
+    lines.extend([
         "",
         "━━━━━━━━━━━━━━━━━━━━━━",
         "",
         "📂 <b>AVAILABLE FILES</b>",
-        f"<code>{_html_escape(total_text)}</code>  •  Page <b>{page_no}</b>",
+        "",
     ])
-    return "\n".join(body)
+    return "\n".join(lines)
 
 
 async def _pro_show_search(client, query, key):
@@ -434,26 +431,29 @@ async def _pro_show_search(client, query, key):
         return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
     caption = _pro_search_caption(state)
     state["caption"] = caption
-    # Keep the search poster while paging and when returning from a movie.
-    if getattr(query.message, "photo", None):
-        await query.message.edit_caption(
-            caption=caption, reply_markup=_pro_search_markup(state),
-            parse_mode=enums.ParseMode.HTML
-        )
-    else:
-        poster = (state.get("meta") or {}).get("poster") or (state.get("meta") or {}).get("backdrop")
-        if poster:
-            try:
-                await query.message.delete()
-            except Exception:
-                pass
-            await client.send_photo(
-                chat_id=query.message.chat.id, photo=poster, caption=caption,
-                reply_markup=_pro_search_markup(state), parse_mode=enums.ParseMode.HTML
-            )
+    markup = _pro_search_markup(state)
+    search_poster = (state.get("meta") or {}).get("poster") or (state.get("meta") or {}).get("backdrop")
+
+    try:
+        if getattr(query.message, "photo", None):
+            if search_poster:
+                try:
+                    await query.message.edit_media(
+                        InputMediaPhoto(media=search_poster, caption=caption, parse_mode=enums.ParseMode.HTML),
+                        reply_markup=markup,
+                    )
+                except Exception:
+                    await query.message.edit_caption(caption=caption, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
+            else:
+                await query.message.edit_caption(caption=caption, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
         else:
-            await _pro_edit_caption_or_text(query.message, caption, _pro_search_markup(state))
-    await query.answer()
+            await query.message.edit_text(text=caption, reply_markup=markup, disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
+        await query.answer()
+    except MessageNotModified:
+        await query.answer()
+    except Exception:
+        logger.exception("PRO search navigation failed")
+        await query.answer("⚠️ Could not return to search. Please tap again.", show_alert=True)
 
 
 async def _pro_render_detail(client, query, key, offset=0, push_history=True):
@@ -465,7 +465,6 @@ async def _pro_render_detail(client, query, key, offset=0, push_history=True):
         offset = int(offset)
     except (TypeError, ValueError):
         offset = 0
-    state["current_offset"] = offset
 
     active_query = state.get("active_query") or title
     files, next_offset, total = await get_search_results(
@@ -477,22 +476,31 @@ async def _pro_render_detail(client, query, key, offset=0, push_history=True):
     FRESH[key] = active_query
     temp.GETALL[key] = files
     temp.SHORT[query.from_user.id] = query.message.chat.id
+    state["last_files"] = files
     if push_history:
         history = state.setdefault("history", [0])
         if not history or history[-1] != offset:
             history.append(offset)
 
-    meta = state.get("meta")
-    if meta is None:
+    meta = state.get("meta") or {}
+    if not meta.get("poster") or not meta.get("title"):
+        fetched = None
         try:
-            if TMDB_POSTER:
-                meta = await get_posterx(title, file=getattr(files[0], "file_name", None))
-            else:
-                meta = await get_poster(title, file=getattr(files[0], "file_name", None))
+            if TMDB_API_KEY:
+                fetched = await get_posterx(title, file=getattr(files[0], "file_name", None))
         except Exception:
-            meta = None
-        state["meta"] = meta or {}
-        state.setdefault("base_meta", dict(state["meta"]))
+            fetched = None
+        if not fetched:
+            try:
+                fetched = await get_poster(title, file=getattr(files[0], "file_name", None))
+            except Exception:
+                fetched = None
+        if fetched:
+            merged = dict(meta)
+            merged.update({k: v for k, v in fetched.items() if v not in (None, "", "N/A")})
+            meta = merged
+        state["meta"] = meta
+        state.setdefault("base_meta", dict(meta))
 
     meta = state.get("meta") or {}
     display_title = _pro_detail_display_title(state, meta, title)
@@ -584,27 +592,30 @@ async def _pro_show_movie(client, query, key, index):
     detail_key = f"{key}:m{index}"
     FRESH[detail_key] = title
     BUTTONS.pop(detail_key, None)
+    search_meta = dict((state.get("meta") or {}))
     PRO_DETAIL[detail_key] = {
         "search_key": key,
         "title": title,
         "active_query": title,
+        "base_query": title,
         "history": [0],
-        "meta": None,
+        "meta": search_meta or None,
+        "base_meta": dict(search_meta),
         "season_number": None,
-        "season_query": None,
-        "current_offset": 0,
+        "quality_filter": None,
+        "language_filter": None,
         "user_id": query.from_user.id if query.from_user else 0,
     }
     await _pro_render_detail(client, query, detail_key, 0, push_history=False)
 
 
-@Client.on_callback_query(filters.regex(r"^mmt#"))
+@Client.on_callback_query(filters.regex(r"^mmt#"), group=-1)
 async def mymovies_title_cb(client, query):
     _, key, index = query.data.split("#", 2)
     await _pro_show_movie(client, query, key, index)
 
 
-@Client.on_callback_query(filters.regex(r"^mmnext#"))
+@Client.on_callback_query(filters.regex(r"^mmnext#"), group=-1)
 async def mymovies_next_titles_cb(client, query):
     key = query.data.split("#", 1)[1]
     state = PRO_SEARCH.get(key)
@@ -616,7 +627,7 @@ async def mymovies_next_titles_cb(client, query):
     await _pro_show_search(client, query, key)
 
 
-@Client.on_callback_query(filters.regex(r"^mmprev#"))
+@Client.on_callback_query(filters.regex(r"^mmprev#"), group=-1)
 async def mymovies_prev_titles_cb(client, query):
     key = query.data.split("#", 1)[1]
     state = PRO_SEARCH.get(key)
@@ -626,7 +637,7 @@ async def mymovies_prev_titles_cb(client, query):
     await _pro_show_search(client, query, key)
 
 
-@Client.on_callback_query(filters.regex(r"^mback#"))
+@Client.on_callback_query(filters.regex(r"^mback#"), group=-1)
 async def mymovies_back_titles_cb(client, query):
     key = query.data.split("#", 1)[1]
     await _pro_show_search(client, query, key)
@@ -734,7 +745,7 @@ async def refercall(bot, query):
     )
     await query.answer()
 
-@Client.on_callback_query(filters.regex(r"^mfileprev#"))
+@Client.on_callback_query(filters.regex(r"^mfileprev#"), group=-1)
 async def pro_movie_files_previous_page(bot, query):
     key = query.data.split("#", 1)[1]
     if key not in PRO_DETAIL:
@@ -748,7 +759,7 @@ async def pro_movie_files_previous_page(bot, query):
     return await _pro_render_detail(bot, query, key, previous_offset, push_history=False)
 
 
-@Client.on_callback_query(filters.regex(r"^mfilenext#"))
+@Client.on_callback_query(filters.regex(r"^mfilenext#"), group=-1)
 async def pro_movie_files_next_page(bot, query):
     """Phase-3-only file pagination; never enters the legacy renderer."""
     try:
@@ -812,11 +823,11 @@ async def next_page(bot, query):
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "✦ Quality", callback_data=f"mmq#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "✦ Language", callback_data=f"mml#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "✦ Season",  callback_data=f"mms#{key}")
                    ]
                    )
         btn.insert(0,
@@ -834,11 +845,11 @@ async def next_page(bot, query):
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "✦ Quality", callback_data=f"mmq#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "✦ Language", callback_data=f"mml#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "✦ Season",  callback_data=f"mms#{key}")
                    ]
                    )
         btn.insert(0, [
@@ -1013,46 +1024,6 @@ async def advantage_spoll_choker(bot, query):
         await k.delete()
 
 # Qualities
-def _pro_filter_back_row(key):
-    state = PRO_DETAIL.get(key) or {}
-    offset = int(state.get("current_offset", 0) or 0)
-    return [
-        InlineKeyboardButton("↩ Back to Files", callback_data=f"mfilterback#{key}"),
-        InlineKeyboardButton("🏠 Home", callback_data="ui_home"),
-    ]
-
-
-async def _pro_render_filtered_detail(client, query, key, search, *, keep_meta=True):
-    state = PRO_DETAIL.get(key)
-    if not state:
-        return await query.answer("⚠️ This movie page has expired.", show_alert=True)
-    files, _, _ = await get_search_results(query.message.chat.id, search, offset=0, filter=True)
-    if not files:
-        return await query.answer("🚫 No matching files found.", show_alert=True)
-    state["active_query"] = search
-    state["history"] = [0]
-    state["current_offset"] = 0
-    if not keep_meta:
-        state["meta"] = state.get("base_meta") or state.get("meta") or {}
-    return await _pro_render_detail(client, query, key, 0, push_history=False)
-
-
-@Client.on_callback_query(filters.regex(r"^mfilterback#"))
-async def pro_filter_back(client, query):
-    key = query.data.split("#", 1)[1]
-    state = PRO_DETAIL.get(key)
-    if not state:
-        return await query.answer("⚠️ This movie page has expired.", show_alert=True)
-    # Restore the base title/season query instead of entering any legacy renderer.
-    state["active_query"] = state.get("season_query") or state.get("title") or FRESH.get(key)
-    if state.get("season_number"):
-        # Keep the selected season metadata/poster.
-        pass
-    else:
-        state["meta"] = state.get("base_meta") or state.get("meta") or {}
-    return await _pro_render_detail(client, query, key, int(state.get("current_offset", 0) or 0), push_history=False)
-
-
 @Client.on_callback_query(filters.regex(r"^qualities#"))
 async def qualities_cb_handler(client: Client, query: CallbackQuery):
     try:
@@ -1066,16 +1037,6 @@ async def qualities_cb_handler(client: Client, query: CallbackQuery):
         pass
 
     _, key = query.data.split("#")
-    if key in PRO_DETAIL:
-        btn = [[InlineKeyboardButton("🎚  SELECT QUALITY", callback_data="ident")]]
-        for i in range(0, len(QUALITIES), 2):
-            row = [InlineKeyboardButton(QUALITIES[i], callback_data=f"fq#{QUALITIES[i].lower()}#{key}")]
-            if i + 1 < len(QUALITIES):
-                row.append(InlineKeyboardButton(QUALITIES[i + 1], callback_data=f"fq#{QUALITIES[i + 1].lower()}#{key}"))
-            btn.append(row)
-        btn.append(_pro_filter_back_row(key))
-        return await query.edit_message_reply_markup(InlineKeyboardMarkup(btn))
-
     search = FRESH.get(key)
     search = search.replace(' ', '_')
 
@@ -1105,14 +1066,6 @@ async def qualities_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^fq#"))
 async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
     _, qual, key = query.data.split("#")
-    if key in PRO_DETAIL:
-        state = PRO_DETAIL[key]
-        base = state.get("title") or FRESH.get(key) or "Movie"
-        if qual == "homepage":
-            state["active_query"] = state.get("season_query") or base
-        else:
-            state["active_query"] = f"{base} {qual}"
-        return await _pro_render_filtered_detail(client, query, key, state["active_query"], keep_meta=True)
     curr_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
     search = FRESH.get(key)
     search = search.replace("_", " ")
@@ -1148,11 +1101,11 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "✦ Quality", callback_data=f"mmq#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "✦ Language", callback_data=f"mml#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "✦ Season",  callback_data=f"mms#{key}")
                    ]
                    )
         btn.insert(0,
@@ -1167,11 +1120,11 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "✦ Quality", callback_data=f"mmq#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "✦ Language", callback_data=f"mml#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "✦ Season",  callback_data=f"mms#{key}")
                    ]
                    )
         btn.insert(0,
@@ -1229,6 +1182,162 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
             pass
     await query.answer()
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MY MOVIES PRO FILTERS — dedicated callbacks; legacy filter UI is bypassed.
+# ─────────────────────────────────────────────────────────────────────────────
+def _pro_filter_languages(files):
+    raw = " ".join(f"{getattr(x,'file_name','')} {getattr(x,'caption','') or ''}" for x in (files or []))
+    mapping = (("hindi", "🇮🇳 Hindi"), ("english", "🇬🇧 English"), ("japanese", "🇯🇵 Japanese"),
+               ("tamil", "Tamil"), ("telugu", "Telugu"), ("malayalam", "Malayalam"),
+               ("kannada", "Kannada"), ("punjabi", "Punjabi"), ("gujarati", "Gujarati"),
+               ("marathi", "Marathi"), ("bengali", "Bengali"))
+    out = []
+    for token, label in mapping:
+        if re.search(rf"\b{re.escape(token)}\b", raw, re.I) and label not in out:
+            out.append(label)
+    return out or ["🇮🇳 Hindi", "🇬🇧 English", "🇯🇵 Japanese"]
+
+
+def _pro_filter_qualities(files):
+    raw = " ".join(f"{getattr(x,'file_name','')} {getattr(x,'caption','') or ''}" for x in (files or [])).lower()
+    found = []
+    for tag in ("4K", "2160P", "1440P", "1080P", "720P", "480P", "360P"):
+        if re.search(re.escape(tag.lower()), raw) and tag not in found:
+            found.append(tag)
+    return found or ["720P", "1080P", "1440P", "2160P"]
+
+
+async def _pro_filter_menu(query, key, kind):
+    state = PRO_DETAIL.get(key)
+    if not state:
+        return await query.answer("⚠️ Movie page expired.", show_alert=True)
+    files = state.get("last_files") or []
+    if kind == "language":
+        title = "🌐 LANGUAGE"
+        items = _pro_filter_languages(files)
+        prefix = "mmlsel#"
+    elif kind == "quality":
+        title = "🎚 QUALITY"
+        items = _pro_filter_qualities(files)
+        prefix = "mmqsel#"
+    else:
+        title = "📺 SEASON"
+        items = [f"Season {int(str(x).lstrip('S'))}" for x in SEASONS]
+        prefix = "mmss#"
+
+    rows = []
+    for item in items:
+        if kind == "season":
+            sn = int(re.search(r"\d+", item).group(0))
+            cb = f"{prefix}{sn:02d}#{key}"
+        else:
+            raw = item.replace("🇮🇳 ", "").replace("🇬🇧 ", "").replace("🇯🇵 ", "")
+            cb = f"{prefix}{quote_plus(raw)}#{key}"
+        rows.append([InlineKeyboardButton(item, callback_data=cb)])
+
+    rows.append([InlineKeyboardButton("↩ Back to Files", callback_data=f"mmfiles#{key}")])
+    rows.append([InlineKeyboardButton("🏠 Home", callback_data="ui_home")])
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"        <b>{title}</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━━━╯"
+    )
+    try:
+        markup = InlineKeyboardMarkup(rows)
+        if getattr(query.message, "photo", None):
+            await query.message.edit_caption(caption=text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
+        else:
+            await query.message.edit_text(text=text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
+        await query.answer()
+    except MessageNotModified:
+        await query.answer()
+    except Exception:
+        logger.exception("PRO filter menu failed")
+        await query.answer("⚠️ Could not open filter.", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^mmq#"), group=-1)
+async def pro_quality_menu(client, query):
+    return await _pro_filter_menu(query, query.data.split("#", 1)[1], "quality")
+
+
+@Client.on_callback_query(filters.regex(r"^mml#"), group=-1)
+async def pro_language_menu(client, query):
+    return await _pro_filter_menu(query, query.data.split("#", 1)[1], "language")
+
+
+@Client.on_callback_query(filters.regex(r"^mms#"), group=-1)
+async def pro_season_menu(client, query):
+    return await _pro_filter_menu(query, query.data.split("#", 1)[1], "season")
+
+
+async def _pro_apply_filter(client, query, key, quality=None, language=None):
+    state = PRO_DETAIL.get(key)
+    if not state:
+        return await query.answer("⚠️ Movie page expired.", show_alert=True)
+    state["quality_filter"] = quality
+    state["language_filter"] = language
+    base = state.get("base_query") or state.get("title") or "Movie"
+    parts = [base]
+    if state.get("season_number"):
+        parts = [state.get("active_query") or base]
+    if quality:
+        parts.append(quality)
+    if language:
+        parts.append(language)
+    state["active_query"] = " ".join(str(x) for x in parts if x)
+    state["history"] = [0]
+    return await _pro_render_detail(client, query, key, 0, push_history=False)
+
+
+@Client.on_callback_query(filters.regex(r"^mmqsel#"), group=-1)
+async def pro_quality_select(client, query):
+    _, value, key = query.data.split("#", 2)
+    return await _pro_apply_filter(client, query, key, quality=value)
+
+
+@Client.on_callback_query(filters.regex(r"^mmlsel#"), group=-1)
+async def pro_language_select(client, query):
+    _, value, key = query.data.split("#", 2)
+    return await _pro_apply_filter(client, query, key, language=value)
+
+
+@Client.on_callback_query(filters.regex(r"^mmss#"), group=-1)
+async def pro_season_select(client, query):
+    _, value, key = query.data.split("#", 2)
+    state = PRO_DETAIL.get(key)
+    if not state:
+        return await query.answer("⚠️ Movie page expired.", show_alert=True)
+    season_number = int(value)
+    base_title = state.get("title") or FRESH.get(key) or "Movie"
+    variations = generate_season_variations(base_title, season_number)
+    chosen = None
+    files = []
+    for candidate in variations:
+        found, _, _ = await get_search_results(query.message.chat.id, candidate, offset=0, filter=True)
+        if found:
+            chosen, files = candidate, found
+            break
+    if not files:
+        return await query.answer("🚫 No files found for this season.", show_alert=True)
+    state["season_number"] = season_number
+    state["active_query"] = chosen
+    state["history"] = [0]
+    state["quality_filter"] = None
+    state["language_filter"] = None
+    state["meta"] = await _pro_get_season_meta(base_title, season_number, state.get("base_meta") or state.get("meta") or {})
+    return await _pro_render_detail(client, query, key, 0, push_history=False)
+
+
+@Client.on_callback_query(filters.regex(r"^mmfiles#"), group=-1)
+async def pro_filters_back(client, query):
+    key = query.data.split("#", 1)[1]
+    state = PRO_DETAIL.get(key)
+    if not state:
+        return await query.answer("⚠️ Movie page expired.", show_alert=True)
+    return await _pro_render_detail(client, query, key, 0, push_history=False)
+
 # languages
 
 
@@ -1245,19 +1354,6 @@ async def languages_cb_handler(client: Client, query: CallbackQuery):
         pass
 
     _, key = query.data.split("#")
-    if key in PRO_DETAIL:
-        btn = [[InlineKeyboardButton("🌐  SELECT LANGUAGE", callback_data="ident")]]
-        items = list(LANGUAGES.items())
-        for i in range(0, len(items), 2):
-            name1, code1 = items[i]
-            row = [InlineKeyboardButton(name1, callback_data=f"fl#{code1}#{key}")]
-            if i + 1 < len(items):
-                name2, code2 = items[i + 1]
-                row.append(InlineKeyboardButton(name2, callback_data=f"fl#{code2}#{key}"))
-            btn.append(row)
-        btn.append(_pro_filter_back_row(key))
-        return await query.edit_message_reply_markup(InlineKeyboardMarkup(btn))
-
     search = FRESH.get(key)
     search = search.replace(' ', '_')
 
@@ -1286,14 +1382,6 @@ async def languages_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^fl#"))
 async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
     _, lang, key = query.data.split("#")
-    if key in PRO_DETAIL:
-        state = PRO_DETAIL[key]
-        base = state.get("title") or FRESH.get(key) or "Movie"
-        if lang == "homepage":
-            state["active_query"] = state.get("season_query") or base
-        else:
-            state["active_query"] = f"{base} {lang}"
-        return await _pro_render_filtered_detail(client, query, key, state["active_query"], keep_meta=True)
     curr_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
     search = FRESH.get(key)
     search = search.replace("_", " ")
@@ -1329,11 +1417,11 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "✦ Quality", callback_data=f"mmq#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "✦ Language", callback_data=f"mml#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "✦ Season",  callback_data=f"mms#{key}")
                    ]
                    )
         btn.insert(0,
@@ -1349,11 +1437,11 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "✦ Quality", callback_data=f"mmq#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "✦ Language", callback_data=f"mml#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "✦ Season",  callback_data=f"mms#{key}")
                    ])
         btn.insert(0,
                    [
@@ -1445,7 +1533,7 @@ async def seasons_cb_handler(client: Client, query: CallbackQuery):
                     callback_data=f"fs#s{season_numbers[i+1]:02d}#{key}"
                 ))
             btn.append(row)
-        btn.append([InlineKeyboardButton("↩ Back to Files", callback_data=f"mfilterback#{key}")])
+        btn.append([InlineKeyboardButton("↩ Back to Files", callback_data=f"mfilenext#{key}#0")])
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
         return await query.answer()
 
@@ -1483,7 +1571,6 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
         base_title = state.get("title") or FRESH.get(key) or "Movie"
         if season_tag == "homepage":
             state["season_number"] = None
-            state["season_query"] = None
             state["active_query"] = base_title
             state["meta"] = state.get("base_meta") or state.get("meta") or {}
         else:
@@ -1503,7 +1590,6 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
             if not files:
                 return await query.answer("🚫 No files found for this season.", show_alert=True)
             state["season_number"] = season_number
-            state["season_query"] = chosen_query
             state["active_query"] = chosen_query
             state["history"] = [0]
             state["meta"] = await _pro_get_season_meta(base_title, season_number, state.get("base_meta") or state.get("meta") or {})
@@ -1556,9 +1642,9 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
     btn.insert(
         0,
         [
-            InlineKeyboardButton("Qᴜᴀʟɪᴛʏ", callback_data=f"qualities#{key}"),
-            InlineKeyboardButton("✦ Language", callback_data=f"languages#{key}"),
-            InlineKeyboardButton("Sᴇᴀꜱᴏɴ", callback_data=f"seasons#{key}"),
+            InlineKeyboardButton("Qᴜᴀʟɪᴛʏ", callback_data=f"mmq#{key}"),
+            InlineKeyboardButton("✦ Language", callback_data=f"mml#{key}"),
+            InlineKeyboardButton("Sᴇᴀꜱᴏɴ", callback_data=f"mms#{key}"),
         ],
     )
     btn.insert(
@@ -1738,9 +1824,9 @@ def _pro_add_back_to_titles(btn, key):
 @Client.on_callback_query()
 async def cb_handler(client: Client, query: CallbackQuery):
     DreamxData = query.data
-    if DreamxData and str(DreamxData).startswith("ui_"):
-        from plugins.ui_pro import dispatch_ui
-        await dispatch_ui(query)
+    if DreamxData and (str(DreamxData).startswith("ui_") or DreamxData in {"premium_info", "buy_info", "upi_info"}):
+        # These callbacks are owned by plugins.ui_pro at group -100.
+        # Do not let the legacy catch-all edit/send another message afterwards.
         return
     try:
         link = await client.create_chat_invite_link(int(REQST_CHANNEL))
@@ -2737,11 +2823,11 @@ async def auto_filter(client, msg, spoll=False):
             btn.insert(0,
                        [
                            InlineKeyboardButton(
-                               "✦ Quality", callback_data=f"qualities#{key}"),
+                               "✦ Quality", callback_data=f"mmq#{key}"),
                            InlineKeyboardButton(
-                               "✦ Language", callback_data=f"languages#{key}"),
+                               "✦ Language", callback_data=f"mml#{key}"),
                            InlineKeyboardButton(
-                               "✦ Season",  callback_data=f"seasons#{key}")
+                               "✦ Season",  callback_data=f"mms#{key}")
                        ]
                        )
             btn.insert(0,
@@ -2757,11 +2843,11 @@ async def auto_filter(client, msg, spoll=False):
             btn.insert(0,
                        [
                            InlineKeyboardButton(
-                               "✦ Quality", callback_data=f"qualities#{key}"),
+                               "✦ Quality", callback_data=f"mmq#{key}"),
                            InlineKeyboardButton(
-                               "✦ Language", callback_data=f"languages#{key}"),
+                               "✦ Language", callback_data=f"mml#{key}"),
                            InlineKeyboardButton(
-                               "✦ Season",  callback_data=f"seasons#{key}")
+                               "✦ Season",  callback_data=f"mms#{key}")
                        ]
                        )
             btn.insert(0,
