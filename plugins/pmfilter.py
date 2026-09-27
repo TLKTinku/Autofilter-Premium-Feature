@@ -241,7 +241,7 @@ async def _pro_show_movie(query, key, index):
     BUTTONS.pop(detail_key, None)
     temp.GETALL[detail_key] = files
     temp.SHORT[query.from_user.id] = query.message.chat.id
-    PRO_DETAIL[detail_key] = {"search_key": key, "title": title}
+    PRO_DETAIL[detail_key] = {"search_key": key, "title": title, "history": [0]}
 
     detail_caption = (
         f"╭━━━━━━━━━━━━━━━━━━━━╮\n"
@@ -393,6 +393,122 @@ async def refercall(bot, query):
         parse_mode=enums.ParseMode.HTML
     )
     await query.answer()
+
+@Client.on_callback_query(filters.regex(r"^next"))
+async def pro_movie_files_next_page(bot, query):
+    """Handle pagination for the new movie-detail screen before legacy next_page.
+
+    Legacy `next_page` renders the old raw-file UI.  For PRO_DETAIL keys we keep
+    the same title/detail screen and only replace the file list.
+    Non-PRO_DETAIL callbacks are left untouched for the original handler below.
+    """
+    try:
+        parts = query.data.split("_", 3)
+        if len(parts) != 4:
+            return
+        _, req, key, offset = parts
+    except Exception:
+        return
+
+    if key not in PRO_DETAIL:
+        # Preserve the original pagination system for every non-PRO result.
+        return await next_page(bot, query)
+
+    if int(req) not in [query.from_user.id, 0]:
+        return await query.answer(
+            script.ALRT_TXT.format(query.from_user.first_name), show_alert=True
+        )
+
+    state = PRO_DETAIL.get(key) or {}
+    title = state.get("title") or FRESH.get(key)
+    if not title:
+        return await query.answer("⚠️ This movie request has expired. Please search again.", show_alert=True)
+
+    try:
+        offset_int = int(offset)
+    except (TypeError, ValueError):
+        offset_int = 0
+
+    files, next_offset, total = await get_search_results(
+        query.message.chat.id, title, offset=offset_int, filter=True
+    )
+    if not files:
+        return await query.answer("🚫 No more files found.", show_alert=True)
+
+    # Keep the existing callback ecosystem working on every page.
+    FRESH[key] = title
+    temp.GETALL[key] = files
+    temp.SHORT[query.from_user.id] = query.message.chat.id
+
+    # Store visited offsets so Back can return to the previous file page.
+    history = state.setdefault("history", [0])
+    if not history or history[-1] != offset_int:
+        history.append(offset_int)
+
+    detail_caption = (
+        f"╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"      🎬 <b>{title}</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"📂 <b>{total}</b> file{'s' if total != 1 else ''} available\n\n"
+        f"💡 <i>Choose Quality / Language / Season, or tap a file below.</i>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"        ✦ <b>SELECT FILE</b> ✦\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━"
+    )
+    markup = _pro_detail_markup(key, files, next_offset, total, query.from_user.id)
+
+    # Replace the generic Next button with a Previous button when applicable.
+    if len(history) > 1:
+        markup.inline_keyboard.insert(2 if len(markup.inline_keyboard) >= 2 else len(markup.inline_keyboard), [
+            InlineKeyboardButton("‹ Previous Files", callback_data=f"mfileprev#{key}")
+        ])
+
+    await _pro_edit_caption_or_text(query.message, detail_caption, markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^mfileprev#"))
+async def pro_movie_files_previous_page(bot, query):
+    key = query.data.split("#", 1)[1]
+    if key not in PRO_DETAIL:
+        return await query.answer("⚠️ This movie page has expired.", show_alert=True)
+
+    state = PRO_DETAIL[key]
+    history = state.get("history", [0])
+    if len(history) <= 1:
+        return await query.answer("Already on the first file page.")
+
+    history.pop()
+    previous_offset = history[-1]
+    title = state.get("title") or FRESH.get(key)
+    files, next_offset, total = await get_search_results(
+        query.message.chat.id, title, offset=previous_offset, filter=True
+    )
+    if not files:
+        return await query.answer("🚫 Previous files are no longer available.", show_alert=True)
+
+    FRESH[key] = title
+    temp.GETALL[key] = files
+    temp.SHORT[query.from_user.id] = query.message.chat.id
+
+    detail_caption = (
+        f"╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"      🎬 <b>{title}</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"📂 <b>{total}</b> file{'s' if total != 1 else ''} available\n\n"
+        f"💡 <i>Choose Quality / Language / Season, or tap a file below.</i>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"        ✦ <b>SELECT FILE</b> ✦\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━"
+    )
+    markup = _pro_detail_markup(key, files, next_offset, total, query.from_user.id)
+    if len(history) > 1:
+        markup.inline_keyboard.insert(2 if len(markup.inline_keyboard) >= 2 else len(markup.inline_keyboard), [
+            InlineKeyboardButton("‹ Previous Files", callback_data=f"mfileprev#{key}")
+        ])
+    await _pro_edit_caption_or_text(query.message, detail_caption, markup)
+    await query.answer()
+
 
 @Client.on_callback_query(filters.regex(r"^next"))
 async def next_page(bot, query):
