@@ -115,3 +115,25 @@ async def usage_cmd(client, message):
         f"DB storage: <code>{_kb(storage_sz)}</code>"
     )
     await msg.edit_text(text)
+
+
+@Client.on_message(filters.command(["grouplist", "groups", "grps"]) & filters.user(ADMINS))
+async def group_list_cmd(client, message):
+    mongo = Media.collection.database
+    lines = ["<b>Saved groups</b>\n"]
+    n = 0
+    try:
+        cursor = mongo["groups"].find({})
+        async for g in cursor:
+            n += 1
+            gid = g.get("id") or g.get("chat_id") or g.get("_id")
+            title = g.get("title") or g.get("name") or "—"
+            lines.append(f"{n}. <code>{gid}</code>\n   {title}")
+    except Exception as e:
+        return await message.reply_text(f"❌ {e}")
+    if n == 0:
+        return await message.reply_text("Groups collection khali hai.")
+    text = "\n".join(lines)
+    if len(text) > 3500:
+        text = text[:3500] + "\n…"
+    await message.reply_text(text)
