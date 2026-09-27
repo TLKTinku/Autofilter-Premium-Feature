@@ -4,6 +4,7 @@ from fuzzywuzzy import process
 from dreamxbotz.util.file_properties import get_name, get_hash
 from urllib.parse import quote_plus
 import logging
+from html import escape as _html_escape
 from database.ia_filterdb import Media, Media2, get_file_details, get_search_results, get_bad_files
 from database.config_db import mdb
 from pyrogram.errors import FloodWait, UserIsBlocked, MessageNotModified, PeerIdInvalid, ChatAdminRequired, UserNotParticipant
@@ -25,6 +26,29 @@ lock = asyncio.Lock()
 logger = logging.getLogger(__name__)
 
 
+def _pro_file_btn(file):
+    """Compact Phase-3 file button: quality • language • size."""
+    name = clean_filename(getattr(file, "file_name", None) or "File")
+    size = get_size(getattr(file, "file_size", 0) or 0)
+    raw = name.lower().replace(" ", "")
+    qual = ""
+    for tag, show in (
+        ("2160p", "4K"), ("4k", "4K"), ("1440p", "1440P"),
+        ("1080p", "1080P"), ("720p", "720P"), ("480p", "480P"), ("360p", "360P"),
+    ):
+        if tag in raw:
+            qual = show
+            break
+    if "multiaudio" in raw or "dualaudio" in raw or "dualaudio" in raw:
+        lang = "Multi Audio"
+    else:
+        try:
+            lang = extract_language(name) or "Language N/A"
+        except Exception:
+            lang = "Language N/A"
+        if not lang or str(lang).upper() in {"N/A", "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ"}:
+            lang = "Language N/A"
+    return f"{qual or 'FILE'} • {lang} • {size}"
 logger.setLevel(logging.ERROR)
 
 tracemalloc.start()
@@ -154,69 +178,7 @@ def _pro_search_markup(state):
     return InlineKeyboardMarkup(rows)
 
 
-def _pro_file_btn(file):
-    name = clean_filename(getattr(file, "file_name", None) or "File")
-    size = get_size(getattr(file, "file_size", 0) or 0)
-    raw = name.lower().replace(" ", "")
-    qual = ""
-    for tag, show in (
-        ("2160p", "4K"), ("4k", "4K"), ("1440p", "1440P"),
-        ("1080p", "1080P"), ("720p", "720P"), ("480p", "480P"), ("360p", "360P"),
-    ):
-        if tag in raw:
-            qual = show
-            break
-    lang = extract_language(name)
-    if lang.startswith("#"):
-        lang = lang.replace("#", "").replace(", ", " • ")
-    if lang == "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ":
-        lang = "Language N/A"
-    if qual:
-        return f"{qual} • {lang} • {size}"
-    return f"{lang} • {size}"
-
-
-def _pro_detail_caption(title, meta, files, total):
-    meta = meta or {}
-    display_title = meta.get("title") or title or "Unknown"
-    year = meta.get("year") or "N/A"
-    # If metadata is unavailable, split a trailing year from the grouped filename title.
-    if not meta.get("title"):
-        m = re.match(r"^(.*?)[ _-]+((?:19|20)\d{2})$", display_title)
-        if m:
-            display_title, year = m.group(1).strip(), m.group(2)
-    rating = meta.get("rating") or "N/A"
-    genres = meta.get("genres") or "N/A"
-    runtime = meta.get("runtime") or "N/A"
-    languages = meta.get("languages") or ""
-    if isinstance(languages, list):
-        languages = ", ".join(str(x) for x in languages if x)
-    if not languages:
-        found = []
-        for f in files:
-            raw = extract_language(getattr(f, "file_name", "") or "")
-            if raw and raw != "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ":
-                for item in raw.replace("#", "").split(", "):
-                    if item not in found:
-                        found.append(item)
-        languages = " • ".join(found) if found else "N/A"
-    runtime_text = str(runtime).replace(" minutes", " min").replace(" minute", " min")
-    return (
-        "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
-        "       🎬 <b>MOVIE</b>\n"
-        "┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
-        f"<b>{display_title}</b>\n"
-        f"{year}\n\n"
-        f"⭐ {rating}/10\n"
-        f"🎭 {genres}\n"
-        f"⏱ {runtime_text}\n"
-        f"🌐 {languages}\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📂 <b>AVAILABLE FILES</b>\n"
-    )
-
-
-def _pro_detail_markup(key, files, next_offset, total_results, req, previous_callback=None):
+def _pro_detail_markup(key, files, next_offset, total_results, req):
     rows = [
         [
             InlineKeyboardButton("💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
@@ -225,25 +187,28 @@ def _pro_detail_markup(key, files, next_offset, total_results, req, previous_cal
         [
             InlineKeyboardButton("🎚 Quality", callback_data=f"qualities#{key}"),
             InlineKeyboardButton("🌐 Language", callback_data=f"languages#{key}"),
+            InlineKeyboardButton("📺 Season", callback_data=f"seasons#{key}"),
         ],
-        [InlineKeyboardButton("📺 Season", callback_data=f"seasons#{key}")],
     ]
-    rows.extend([[InlineKeyboardButton(_pro_file_btn(file), callback_data=f"file#{file.file_id}")] for file in files])
+    rows.extend([
+        [InlineKeyboardButton(_pro_file_btn(file), callback_data=f"file#{file.file_id}")]
+        for file in files
+    ])
+
     nav = []
-    if previous_callback:
-        nav.append(InlineKeyboardButton("‹ Previous", callback_data=previous_callback))
     if next_offset != "":
         nav.append(InlineKeyboardButton("Next ›", callback_data=f"next_{req}_{key}_{next_offset}"))
     if nav:
         rows.append(nav)
     rows.append([
-        InlineKeyboardButton("⬅ Back", callback_data=f"mback#{PRO_DETAIL[key]['search_key']}"),
+        InlineKeyboardButton("⬅️ Back to Movies", callback_data=f"mback#{PRO_DETAIL[key]['search_key']}"),
         InlineKeyboardButton("🏠 Home", callback_data="ui_home"),
     ])
     return InlineKeyboardMarkup(rows)
 
 
 async def _pro_edit_caption_or_text(message, text, markup):
+    """Edit a PRO message without changing media type."""
     try:
         if getattr(message, "photo", None) or getattr(message, "video", None) or getattr(message, "animation", None):
             await message.edit_caption(caption=text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
@@ -253,15 +218,162 @@ async def _pro_edit_caption_or_text(message, text, markup):
         pass
 
 
-async def _pro_show_search(query, key):
+def _pro_search_caption(state):
+    groups = state.get("groups", [])
+    query_text = _html_escape(str(state.get("query") or "Movie"))
+    page = int(state.get("title_page", 0)) + 1
+    total_pages = max(1, math.ceil(len(groups) / PRO_TITLE_PAGE))
+    start = int(state.get("title_page", 0)) * PRO_TITLE_PAGE + 1
+    end = min(start + PRO_TITLE_PAGE - 1, len(groups))
+    shown = max(0, end - start + 1) if groups else 0
+    return (
+        "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
+        "        🎬 <b>SEARCH RESULTS</b>\n"
+        "┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+        f"🔎 <b>{query_text}</b>\n"
+        f"📂 <b>{len(groups)}</b> movie titles found\n"
+        f"📄 Page <b>{page}/{total_pages}</b> • Showing <b>{shown}</b>\n\n"
+        "💡 <b>Quick Tip:</b> Movie name par tap karein —\n"
+        "   next page par available files milengi."
+    )
+
+
+def _pro_detail_caption(title, total, meta, files):
+    safe_title = _html_escape(str(meta.get("title") or title or "Movie"))
+    year = meta.get("year") or "N/A"
+    rating = meta.get("rating") or "N/A"
+    genres = meta.get("genres") or "N/A"
+    runtime = meta.get("runtime") or "N/A"
+    combined = " ".join(
+        f"{getattr(f, 'file_name', '')} {getattr(f, 'caption', '') or ''}" for f in (files or [])
+    )
+    try:
+        detected = extract_language(combined) if combined else ""
+    except Exception:
+        detected = ""
+    languages = detected if detected and str(detected).upper() not in {"N/A", "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ"} else (meta.get("languages") or "N/A")
+    if isinstance(languages, (list, tuple)):
+        languages = " • ".join(str(x) for x in languages if x) or "N/A"
+    return (
+        "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
+        "          🎬 <b>MOVIE</b>\n"
+        "┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+        f"<b>{safe_title}</b>\n"
+        f"{year}\n\n"
+        f"⭐ {rating}/10\n"
+        f"🎭 {genres}\n"
+        f"⏱ {runtime}\n"
+        f"🌐 {languages}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "📂 <b>AVAILABLE FILES</b>"
+    )
+
+
+async def _pro_show_search(client, query, key):
     state = PRO_SEARCH.get(key)
     if not state:
         return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
-    await _pro_edit_caption_or_text(query.message, state["caption"], _pro_search_markup(state))
+    caption = _pro_search_caption(state)
+    state["caption"] = caption
+    # Back from a detail photo must return to a clean text-only search page.
+    if getattr(query.message, "photo", None) or getattr(query.message, "video", None) or getattr(query.message, "animation", None):
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await client.send_message(
+            chat_id=query.message.chat.id,
+            text=caption,
+            reply_markup=_pro_search_markup(state),
+            disable_web_page_preview=True,
+            parse_mode=enums.ParseMode.HTML,
+        )
+    else:
+        await _pro_edit_caption_or_text(query.message, caption, _pro_search_markup(state))
     await query.answer()
 
 
-async def _pro_show_movie(query, key, index):
+async def _pro_render_detail(client, query, key, offset=0, push_history=True):
+    state = PRO_DETAIL.get(key) or {}
+    title = state.get("title") or FRESH.get(key)
+    if not title:
+        return await query.answer("⚠️ This movie request has expired. Please search again.", show_alert=True)
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        offset = 0
+
+    files, next_offset, total = await get_search_results(
+        query.message.chat.id, title, offset=offset, filter=True
+    )
+    if not files:
+        return await query.answer("🚫 No files found for this page.", show_alert=True)
+
+    FRESH[key] = title
+    temp.GETALL[key] = files
+    temp.SHORT[query.from_user.id] = query.message.chat.id
+    if push_history:
+        history = state.setdefault("history", [0])
+        if not history or history[-1] != offset:
+            history.append(offset)
+
+    meta = state.get("meta")
+    if meta is None:
+        try:
+            if TMDB_POSTER:
+                meta = await get_posterx(title, file=getattr(files[0], "file_name", None))
+            else:
+                meta = await get_poster(title, file=getattr(files[0], "file_name", None))
+        except Exception:
+            meta = None
+        state["meta"] = meta or {}
+
+    caption = _pro_detail_caption(title, total, state.get("meta") or {}, files)
+    markup = _pro_detail_markup(key, files, next_offset, total, query.from_user.id)
+    history = state.get("history", [0])
+    if len(history) > 1:
+        markup.inline_keyboard.insert(2, [
+            InlineKeyboardButton("‹ Previous Files", callback_data=f"mfileprev#{key}")
+        ])
+
+    # First visit: create a real poster message. Later pages: edit its caption/buttons.
+    if state.get("message_id") != getattr(query.message, "id", None) or not getattr(query.message, "photo", None):
+        # If the current message is the old search text, remove it and replace it with the detail poster.
+        if not getattr(query.message, "photo", None):
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+            poster = (state.get("meta") or {}).get("poster") or (state.get("meta") or {}).get("backdrop")
+            sent = None
+            if poster:
+                try:
+                    sent = await client.send_photo(
+                        chat_id=query.message.chat.id,
+                        photo=poster,
+                        caption=caption,
+                        reply_markup=markup,
+                        parse_mode=enums.ParseMode.HTML,
+                    )
+                except Exception:
+                    sent = None
+            if sent is None:
+                sent = await client.send_message(
+                    chat_id=query.message.chat.id,
+                    text=caption,
+                    reply_markup=markup,
+                    disable_web_page_preview=True,
+                    parse_mode=enums.ParseMode.HTML,
+                )
+            state["message_id"] = sent.id
+        else:
+            state["message_id"] = query.message.id
+    else:
+        await _pro_edit_caption_or_text(query.message, caption, markup)
+    await query.answer()
+
+
+async def _pro_show_movie(client, query, key, index):
     state = PRO_SEARCH.get(key)
     if not state:
         return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
@@ -275,68 +387,16 @@ async def _pro_show_movie(query, key, index):
 
     title = groups[index]["title"]
     detail_key = f"{key}:m{index}"
-    files, next_offset, total = await get_search_results(
-        query.message.chat.id, title, offset=0, filter=True
-    )
-    if not files:
-        return await query.answer("🚫 No files found for this title.", show_alert=True)
-
     FRESH[detail_key] = title
     BUTTONS.pop(detail_key, None)
-    temp.GETALL[detail_key] = files
-    temp.SHORT[query.from_user.id] = query.message.chat.id
-    PRO_DETAIL[detail_key] = {"search_key": key, "title": title, "history": [0], "meta": {}}
-
-    try:
-        await query.answer("⏳ Loading movie details…")
-    except Exception:
-        pass
-
-    meta = None
-    try:
-        meta = await (get_posterx(title) if TMDB_ON_SEARCH else get_poster(title))
-    except Exception:
-        meta = None
-    meta = meta or {}
-    PRO_DETAIL[detail_key]["meta"] = meta
-
-    detail_caption = _pro_detail_caption(title, meta, files, total)
-    markup = _pro_detail_markup(detail_key, files, next_offset, total, query.from_user.id)
-    poster = meta.get("poster")
-
-    # If the search result is already a media message, update it in place.
-    if poster and (getattr(query.message, "photo", None) or getattr(query.message, "video", None)):
-        try:
-            await query.message.edit_media(
-                InputMediaPhoto(poster, caption=detail_caption, parse_mode=enums.ParseMode.HTML),
-                reply_markup=markup,
-            )
-            return
-        except Exception:
-            pass
-
-    # Text -> poster conversion needs a new Telegram message; keep state so Back works.
-    if poster:
-        try:
-            sent = await query.message.reply_photo(
-                poster, caption=detail_caption, reply_markup=markup,
-                parse_mode=enums.ParseMode.HTML,
-            )
-            try:
-                await query.message.delete()
-            except Exception:
-                pass
-            return
-        except Exception:
-            pass
-
-    await _pro_edit_caption_or_text(query.message, detail_caption, markup)
+    PRO_DETAIL[detail_key] = {"search_key": key, "title": title, "history": [0], "meta": None}
+    await _pro_render_detail(client, query, detail_key, 0, push_history=False)
 
 
 @Client.on_callback_query(filters.regex(r"^mmt#"))
 async def mymovies_title_cb(client, query):
     _, key, index = query.data.split("#", 2)
-    await _pro_show_movie(query, key, index)
+    await _pro_show_movie(client, query, key, index)
 
 
 @Client.on_callback_query(filters.regex(r"^mmnext#"))
@@ -348,7 +408,7 @@ async def mymovies_next_titles_cb(client, query):
     if (state.get("title_page", 0) + 1) * PRO_TITLE_PAGE >= len(state.get("groups", [])):
         return await query.answer("No more titles found.")
     state["title_page"] += 1
-    await _pro_show_search(query, key)
+    await _pro_show_search(client, query, key)
 
 
 @Client.on_callback_query(filters.regex(r"^mmprev#"))
@@ -358,13 +418,13 @@ async def mymovies_prev_titles_cb(client, query):
     if not state:
         return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
     state["title_page"] = max(0, state.get("title_page", 0) - 1)
-    await _pro_show_search(query, key)
+    await _pro_show_search(client, query, key)
 
 
 @Client.on_callback_query(filters.regex(r"^mback#"))
 async def mymovies_back_titles_cb(client, query):
     key = query.data.split("#", 1)[1]
-    await _pro_show_search(query, key)
+    await _pro_show_search(client, query, key)
 
 
 
@@ -471,12 +531,7 @@ async def refercall(bot, query):
 
 @Client.on_callback_query(filters.regex(r"^next"))
 async def pro_movie_files_next_page(bot, query):
-    """Handle pagination for the new movie-detail screen before legacy next_page.
-
-    Legacy `next_page` renders the old raw-file UI.  For PRO_DETAIL keys we keep
-    the same title/detail screen and only replace the file list.
-    Non-PRO_DETAIL callbacks are left untouched for the original handler below.
-    """
+    """Phase-3 next handler. Keeps the poster/title/details layout."""
     try:
         parts = query.data.split("_", 3)
         if len(parts) != 4:
@@ -484,51 +539,15 @@ async def pro_movie_files_next_page(bot, query):
         _, req, key, offset = parts
     except Exception:
         return
-
     if key not in PRO_DETAIL:
-        # Preserve the original pagination system for every non-PRO result.
         return await next_page(bot, query)
-
     if int(req) not in [query.from_user.id, 0]:
-        return await query.answer(
-            script.ALRT_TXT.format(query.from_user.first_name), show_alert=True
-        )
-
-    state = PRO_DETAIL.get(key) or {}
-    title = state.get("title") or FRESH.get(key)
-    if not title:
-        return await query.answer("⚠️ This movie request has expired. Please search again.", show_alert=True)
-
+        return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
     try:
         offset_int = int(offset)
     except (TypeError, ValueError):
         offset_int = 0
-
-    files, next_offset, total = await get_search_results(
-        query.message.chat.id, title, offset=offset_int, filter=True
-    )
-    if not files:
-        return await query.answer("🚫 No more files found.", show_alert=True)
-
-    # Keep the existing callback ecosystem working on every page.
-    FRESH[key] = title
-    temp.GETALL[key] = files
-    temp.SHORT[query.from_user.id] = query.message.chat.id
-
-    # Store visited offsets so Back can return to the previous file page.
-    history = state.setdefault("history", [0])
-    if not history or history[-1] != offset_int:
-        history.append(offset_int)
-
-    meta = state.get("meta") or {}
-    detail_caption = _pro_detail_caption(title, meta, files, total)
-    markup = _pro_detail_markup(
-        key, files, next_offset, total, query.from_user.id,
-        previous_callback=f"mfileprev#{key}" if len(history) > 1 else None,
-    )
-
-    await _pro_edit_caption_or_text(query.message, detail_caption, markup)
-    await query.answer()
+    return await _pro_render_detail(bot, query, key, offset_int, push_history=True)
 
 
 @Client.on_callback_query(filters.regex(r"^mfileprev#"))
@@ -536,38 +555,28 @@ async def pro_movie_files_previous_page(bot, query):
     key = query.data.split("#", 1)[1]
     if key not in PRO_DETAIL:
         return await query.answer("⚠️ This movie page has expired.", show_alert=True)
-
     state = PRO_DETAIL[key]
     history = state.get("history", [0])
     if len(history) <= 1:
         return await query.answer("Already on the first file page.")
-
     history.pop()
     previous_offset = history[-1]
-    title = state.get("title") or FRESH.get(key)
-    files, next_offset, total = await get_search_results(
-        query.message.chat.id, title, offset=previous_offset, filter=True
-    )
-    if not files:
-        return await query.answer("🚫 Previous files are no longer available.", show_alert=True)
-
-    FRESH[key] = title
-    temp.GETALL[key] = files
-    temp.SHORT[query.from_user.id] = query.message.chat.id
-
-    meta = state.get("meta") or {}
-    detail_caption = _pro_detail_caption(title, meta, files, total)
-    markup = _pro_detail_markup(
-        key, files, next_offset, total, query.from_user.id,
-        previous_callback=f"mfileprev#{key}" if len(history) > 1 else None,
-    )
-    await _pro_edit_caption_or_text(query.message, detail_caption, markup)
-    await query.answer()
+    return await _pro_render_detail(bot, query, key, previous_offset, push_history=False)
 
 
 @Client.on_callback_query(filters.regex(r"^next"))
 async def next_page(bot, query):
     ident, req, key, offset = query.data.split("_")
+    # Hard guard: even if Pyrogram dispatch order changes, PRO movie pages
+    # must never fall back to the legacy raw-file renderer.
+    if key in PRO_DETAIL:
+        if int(req) not in [query.from_user.id, 0]:
+            return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+        try:
+            offset_int = int(offset)
+        except (TypeError, ValueError):
+            offset_int = 0
+        return await _pro_render_detail(bot, query, key, offset_int, push_history=True)
     curr_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
     if int(req) not in [query.from_user.id, 0]:
         return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
@@ -2493,18 +2502,16 @@ async def auto_filter(client, msg, spoll=False):
                     for idx, file in enumerate(files, start=1):
                         cap += f"<b>\n{idx}. <a href='https://telegram.me/{temp.U_NAME}?start=file_{message.chat.id}_{file.file_id}'>[{get_size(file.file_size)}] {clean_filename(file.file_name)}\n</a></b>"
 
-        # New title-first UI: quality/language/season are intentionally moved to page 2.
-        if settings.get('button') and key in PRO_SEARCH:
-            hint = (
-                "💡 <b>Tip:</b> <i>Movie name par click karein — next page par available files milengi.</i>\n\n"
-            )
-            PRO_SEARCH[key]["caption"] = hint + cap
+        # Phase-3 title-first UI: clean text-only search page.
+        is_pro_search = settings.get('button') and key in PRO_SEARCH
+        if is_pro_search:
+            PRO_SEARCH[key]["caption"] = _pro_search_caption(PRO_SEARCH[key])
             cap = PRO_SEARCH[key]["caption"]
             btn = _pro_search_markup(PRO_SEARCH[key])
 
         sent = None
         try:
-            if imdb and imdb.get('poster'):
+            if imdb and imdb.get('poster') and not is_pro_search:
                 try:
                     if TMDB_POSTER:
                         photo = imdb.get('backdrop') if imdb.get('backdrop') and LANDSCAPE_POSTER else imdb.get('poster')
