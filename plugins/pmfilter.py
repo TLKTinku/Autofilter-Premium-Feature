@@ -25,22 +25,6 @@ lock = asyncio.Lock()
 logger = logging.getLogger(__name__)
 
 
-def _pro_file_btn(file):
-    name = clean_filename(getattr(file, "file_name", None) or "File")
-    size = get_size(getattr(file, "file_size", 0) or 0)
-    raw = name.lower().replace(" ", "")
-    qual = ""
-    for tag, show in (
-        ("2160p", "4K"), ("4k", "4K"), ("1440p", "1440P"),
-        ("1080p", "1080P"), ("720p", "720P"), ("480p", "480P"), ("360p", "360P"),
-    ):
-        if tag in raw:
-            qual = show
-            break
-    short = name[:26] + ("…" if len(name) > 26 else "")
-    if qual:
-        return f"✦ {qual} · {size} · {short}"
-    return f"✦ {size} · {short}"
 logger.setLevel(logging.ERROR)
 
 tracemalloc.start()
@@ -69,18 +53,6 @@ PRO_DETAIL = {}          # detail_key -> movie detail state
 PRO_SCAN_BATCH = 40      # DB records per discovery batch
 PRO_MAX_SCAN = 400       # hard upper bound on discovery work per search
 PRO_TITLE_PAGE = 10      # movie titles shown per page
-PRO_MAX_STATES = 100     # bounded UI state; keeps Render RAM predictable
-
-
-def _pro_trim_state_caches():
-    """Bound UI-only state dictionaries so searches cannot grow forever."""
-    for cache in (PRO_SEARCH, PRO_DETAIL):
-        while len(cache) > PRO_MAX_STATES:
-            try:
-                cache.pop(next(iter(cache)))
-            except StopIteration:
-                break
-
 
 _PRO_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 _PRO_NOISE_RE = re.compile(
@@ -182,7 +154,69 @@ def _pro_search_markup(state):
     return InlineKeyboardMarkup(rows)
 
 
-def _pro_detail_markup(key, files, next_offset, total_results, req):
+def _pro_file_btn(file):
+    name = clean_filename(getattr(file, "file_name", None) or "File")
+    size = get_size(getattr(file, "file_size", 0) or 0)
+    raw = name.lower().replace(" ", "")
+    qual = ""
+    for tag, show in (
+        ("2160p", "4K"), ("4k", "4K"), ("1440p", "1440P"),
+        ("1080p", "1080P"), ("720p", "720P"), ("480p", "480P"), ("360p", "360P"),
+    ):
+        if tag in raw:
+            qual = show
+            break
+    lang = extract_language(name)
+    if lang.startswith("#"):
+        lang = lang.replace("#", "").replace(", ", " • ")
+    if lang == "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ":
+        lang = "Language N/A"
+    if qual:
+        return f"{qual} • {lang} • {size}"
+    return f"{lang} • {size}"
+
+
+def _pro_detail_caption(title, meta, files, total):
+    meta = meta or {}
+    display_title = meta.get("title") or title or "Unknown"
+    year = meta.get("year") or "N/A"
+    # If metadata is unavailable, split a trailing year from the grouped filename title.
+    if not meta.get("title"):
+        m = re.match(r"^(.*?)[ _-]+((?:19|20)\d{2})$", display_title)
+        if m:
+            display_title, year = m.group(1).strip(), m.group(2)
+    rating = meta.get("rating") or "N/A"
+    genres = meta.get("genres") or "N/A"
+    runtime = meta.get("runtime") or "N/A"
+    languages = meta.get("languages") or ""
+    if isinstance(languages, list):
+        languages = ", ".join(str(x) for x in languages if x)
+    if not languages:
+        found = []
+        for f in files:
+            raw = extract_language(getattr(f, "file_name", "") or "")
+            if raw and raw != "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ":
+                for item in raw.replace("#", "").split(", "):
+                    if item not in found:
+                        found.append(item)
+        languages = " • ".join(found) if found else "N/A"
+    runtime_text = str(runtime).replace(" minutes", " min").replace(" minute", " min")
+    return (
+        "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
+        "       🎬 <b>MOVIE</b>\n"
+        "┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+        f"<b>{display_title}</b>\n"
+        f"{year}\n\n"
+        f"⭐ {rating}/10\n"
+        f"🎭 {genres}\n"
+        f"⏱ {runtime_text}\n"
+        f"🌐 {languages}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "📂 <b>AVAILABLE FILES</b>\n"
+    )
+
+
+def _pro_detail_markup(key, files, next_offset, total_results, req, previous_callback=None):
     rows = [
         [
             InlineKeyboardButton("💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
@@ -191,21 +225,19 @@ def _pro_detail_markup(key, files, next_offset, total_results, req):
         [
             InlineKeyboardButton("🎚 Quality", callback_data=f"qualities#{key}"),
             InlineKeyboardButton("🌐 Language", callback_data=f"languages#{key}"),
-            InlineKeyboardButton("📺 Season", callback_data=f"seasons#{key}"),
         ],
+        [InlineKeyboardButton("📺 Season", callback_data=f"seasons#{key}")],
     ]
-    rows.extend([
-        [InlineKeyboardButton(_pro_file_btn(file), callback_data=f"file#{file.file_id}")]
-        for file in files
-    ])
-
+    rows.extend([[InlineKeyboardButton(_pro_file_btn(file), callback_data=f"file#{file.file_id}")] for file in files])
     nav = []
+    if previous_callback:
+        nav.append(InlineKeyboardButton("‹ Previous", callback_data=previous_callback))
     if next_offset != "":
         nav.append(InlineKeyboardButton("Next ›", callback_data=f"next_{req}_{key}_{next_offset}"))
     if nav:
         rows.append(nav)
     rows.append([
-        InlineKeyboardButton("⬅️ Back to Movies", callback_data=f"mback#{PRO_DETAIL[key]['search_key']}"),
+        InlineKeyboardButton("⬅ Back", callback_data=f"mback#{PRO_DETAIL[key]['search_key']}"),
         InlineKeyboardButton("🏠 Home", callback_data="ui_home"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -253,22 +285,52 @@ async def _pro_show_movie(query, key, index):
     BUTTONS.pop(detail_key, None)
     temp.GETALL[detail_key] = files
     temp.SHORT[query.from_user.id] = query.message.chat.id
-    PRO_DETAIL[detail_key] = {"search_key": key, "title": title, "history": [0]}
-    _pro_trim_state_caches()
+    PRO_DETAIL[detail_key] = {"search_key": key, "title": title, "history": [0], "meta": {}}
 
-    detail_caption = (
-        f"╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        f"      🎬 <b>{title}</b>\n"
-        f"╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"📂 <b>{total}</b> file{'s' if total != 1 else ''} available\n\n"
-        f"💡 <i>Select Quality / Language / Season, or tap a file below.</i>\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"        ✦ <b>SELECT FILE</b> ✦\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
-    )
+    try:
+        await query.answer("⏳ Loading movie details…")
+    except Exception:
+        pass
+
+    meta = None
+    try:
+        meta = await (get_posterx(title) if TMDB_ON_SEARCH else get_poster(title))
+    except Exception:
+        meta = None
+    meta = meta or {}
+    PRO_DETAIL[detail_key]["meta"] = meta
+
+    detail_caption = _pro_detail_caption(title, meta, files, total)
     markup = _pro_detail_markup(detail_key, files, next_offset, total, query.from_user.id)
+    poster = meta.get("poster")
+
+    # If the search result is already a media message, update it in place.
+    if poster and (getattr(query.message, "photo", None) or getattr(query.message, "video", None)):
+        try:
+            await query.message.edit_media(
+                InputMediaPhoto(poster, caption=detail_caption, parse_mode=enums.ParseMode.HTML),
+                reply_markup=markup,
+            )
+            return
+        except Exception:
+            pass
+
+    # Text -> poster conversion needs a new Telegram message; keep state so Back works.
+    if poster:
+        try:
+            sent = await query.message.reply_photo(
+                poster, caption=detail_caption, reply_markup=markup,
+                parse_mode=enums.ParseMode.HTML,
+            )
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+            return
+        except Exception:
+            pass
+
     await _pro_edit_caption_or_text(query.message, detail_caption, markup)
-    await query.answer()
 
 
 @Client.on_callback_query(filters.regex(r"^mmt#"))
@@ -458,23 +520,12 @@ async def pro_movie_files_next_page(bot, query):
     if not history or history[-1] != offset_int:
         history.append(offset_int)
 
-    detail_caption = (
-        f"╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        f"      🎬 <b>{title}</b>\n"
-        f"╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"📂 <b>{total}</b> file{'s' if total != 1 else ''} available\n\n"
-        f"💡 <i>Choose Quality / Language / Season, or tap a file below.</i>\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"        ✦ <b>SELECT FILE</b> ✦\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
+    meta = state.get("meta") or {}
+    detail_caption = _pro_detail_caption(title, meta, files, total)
+    markup = _pro_detail_markup(
+        key, files, next_offset, total, query.from_user.id,
+        previous_callback=f"mfileprev#{key}" if len(history) > 1 else None,
     )
-    markup = _pro_detail_markup(key, files, next_offset, total, query.from_user.id)
-
-    # Replace the generic Next button with a Previous button when applicable.
-    if len(history) > 1:
-        markup.inline_keyboard.insert(2 if len(markup.inline_keyboard) >= 2 else len(markup.inline_keyboard), [
-            InlineKeyboardButton("‹ Previous Files", callback_data=f"mfileprev#{key}")
-        ])
 
     await _pro_edit_caption_or_text(query.message, detail_caption, markup)
     await query.answer()
@@ -504,21 +555,12 @@ async def pro_movie_files_previous_page(bot, query):
     temp.GETALL[key] = files
     temp.SHORT[query.from_user.id] = query.message.chat.id
 
-    detail_caption = (
-        f"╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        f"      🎬 <b>{title}</b>\n"
-        f"╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"📂 <b>{total}</b> file{'s' if total != 1 else ''} available\n\n"
-        f"💡 <i>Choose Quality / Language / Season, or tap a file below.</i>\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"        ✦ <b>SELECT FILE</b> ✦\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
+    meta = state.get("meta") or {}
+    detail_caption = _pro_detail_caption(title, meta, files, total)
+    markup = _pro_detail_markup(
+        key, files, next_offset, total, query.from_user.id,
+        previous_callback=f"mfileprev#{key}" if len(history) > 1 else None,
     )
-    markup = _pro_detail_markup(key, files, next_offset, total, query.from_user.id)
-    if len(history) > 1:
-        markup.inline_keyboard.insert(2 if len(markup.inline_keyboard) >= 2 else len(markup.inline_keyboard), [
-            InlineKeyboardButton("‹ Previous Files", callback_data=f"mfileprev#{key}")
-        ])
     await _pro_edit_caption_or_text(query.message, detail_caption, markup)
     await query.answer()
 
@@ -2299,7 +2341,6 @@ async def auto_filter(client, msg, spoll=False):
                 "group_next_offset": group_next_offset,
                 "total_results": total_results,
             }
-            _pro_trim_state_caches()
 
         if settings.get('button'):
             btn = [
