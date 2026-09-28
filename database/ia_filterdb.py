@@ -22,6 +22,11 @@ logger.setLevel(logging.INFO)
 _PUNCT_RE = re.compile(r"[^\w\s]+", re.UNICODE)
 _SEASON_TOKEN_RE = re.compile(r'^(?:s|se|ssn|season)0*(\d{1,2})$', re.IGNORECASE)
 _EPISODE_TOKEN_RE = re.compile(r'^(?:e|ep|eps|episode)0*(\d{1,3})$', re.IGNORECASE)
+# Combined forms: S01E07, S1E7, s01e07, S01EP07, etc.
+_COMBINED_SE_RE = re.compile(
+    r'^(?:s|se|ssn|season)?0*(\d{1,2})\s*(?:x|e|ep|eps|episode)0*(\d{1,3})$',
+    re.IGNORECASE,
+)
 _SKIP_SEARCH_TOKENS = {
     "mkv", "mp4", "avi", "mov", "webm", "the", "a", "an", "and", "of", "in", "on",
     "dual", "audio", "multi", "bluray", "webrip", "webdl", "hdrip",
@@ -54,12 +59,24 @@ def normalize_search_text(text: str) -> str:
 
 
 def collapse_season_episode_tokens(tokens):
-    """season 4 / s 04 / s-2 / episode 3 → s4 / ep3 so variants match."""
+    """
+    Normalize every season/episode style to sN / epN:
+      season 1, s 01, s-1, S01, S1  → s1
+      episode 7, ep 07, e-7, E07, Ep1 → ep7
+      S01E07, S1E7, 1x07              → s1 + ep7
+    """
     out = []
     i = 0
     while i < len(tokens):
         t = tokens[i].lower()
         nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
+        # Combined token first: s01e07 / 1x07 / s1ep7
+        cm = _COMBINED_SE_RE.fullmatch(t)
+        if cm:
+            out.append(f"s{int(cm.group(1))}")
+            out.append(f"ep{int(cm.group(2))}")
+            i += 1
+            continue
         if t in {"s", "se", "ssn", "season"} and re.fullmatch(r'\d{1,2}', nxt):
             out.append(f"s{int(nxt)}")
             i += 2
@@ -67,6 +84,17 @@ def collapse_season_episode_tokens(tokens):
         if t in {"e", "ep", "eps", "episode"} and re.fullmatch(r'\d{1,3}', nxt):
             out.append(f"ep{int(nxt)}")
             i += 2
+            continue
+        # already glued: s01 / season1 / e07 / episode07 / ep1
+        sm = _SEASON_TOKEN_RE.fullmatch(t)
+        if sm:
+            out.append(f"s{int(sm.group(1))}")
+            i += 1
+            continue
+        em = _EPISODE_TOKEN_RE.fullmatch(t)
+        if em:
+            out.append(f"ep{int(em.group(1))}")
+            i += 1
             continue
         out.append(tokens[i])
         i += 1
@@ -93,14 +121,31 @@ def _token_to_regex(token: str, fuzzy: bool = False) -> str:
     token = token.strip()
     if not token:
         return ""
+    # Combined S01E07 left as one token (fallback)
+    cm = _COMBINED_SE_RE.fullmatch(token)
+    if cm:
+        s_num, e_num = int(cm.group(1)), int(cm.group(2))
+        return (
+            rf"(?:s(?:eason|e|sn)?[\s._-]*0*{s_num}[\s._-]*e(?:p(?:isode)?)?[\s._-]*0*{e_num}"
+            rf"|season[\s._-]*0*{s_num}[\s._-]*(?:episode|ep|e)[\s._-]*0*{e_num}"
+            rf"|0*{s_num}\s*[xX]\s*0*{e_num})"
+        )
     sm = _SEASON_TOKEN_RE.fullmatch(token)
     if sm:
         num = int(sm.group(1))
-        return rf"(?:s(?:eason|e|sn)?[\s._-]*0*{num}|season[\s._-]*0*{num})"
+        # Matches: S1 S01 S-1 Season 1 Season01 Se1 Ssn1
+        return (
+            rf"(?:s(?:eason|e|sn)?[\s._-]*0*{num}|season[\s._-]*0*{num}"
+            rf"|(?<![a-z0-9])0*{num}(?=\s*[xXeE]))"
+        )
     em = _EPISODE_TOKEN_RE.fullmatch(token)
     if em:
         num = int(em.group(1))
-        return rf"(?:e(?:p(?:isode)?)?[\s._-]*0*{num}|episode[\s._-]*0*{num})"
+        # Matches: E1 E01 Ep1 Episode 1 Episode01 E-1
+        return (
+            rf"(?:e(?:p(?:isode)?)?[\s._-]*0*{num}|episode[\s._-]*0*{num}"
+            rf"|(?<=[xX])\s*0*{num}(?!\d))"
+        )
     if fuzzy:
         return _one_typo_regex(token)
     return re.escape(token)
@@ -110,6 +155,15 @@ def _query_tokens(query: str):
     cleaned = normalize_search_text(query)
     if not cleaned:
         return []
+    # Pre-split glued forms so "S01E07" / "1x07" become separate tokens
+    cleaned = re.sub(
+        r'\b([Ss](?:eason|e|sn)?)\s*0*(\d{1,2})\s*([Ee](?:p(?:isode)?)?)\s*0*(\d{1,3})\b',
+        r's\2 ep\4',
+        cleaned,
+    )
+    cleaned = re.sub(r'\b(\d{1,2})\s*[xX]\s*(\d{1,3})\b', r's\1 ep\2', cleaned)
+    cleaned = re.sub(r'\b([Ss](?:eason|e|sn)?)0*(\d{1,2})\b', r's\2', cleaned)
+    cleaned = re.sub(r'\b([Ee](?:p(?:isode)?)?)0*(\d{1,3})\b', r'ep\2', cleaned)
     raw_tokens = cleaned.split()
     tokens = []
     for t in raw_tokens:
