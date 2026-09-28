@@ -156,13 +156,10 @@ async def get_movie_detailsx(query, id=False, file=None):
                     if year_match:
                         year = year_match[0]
 
-                # Prefer the ACTUAL matched file's title over the raw (often generic)
-                # search query — this fixes cases like searching "Harry Potter" but the
-                # file that actually matched being the 2nd/3rd movie, not the 1st.
+                # Prefer the ACTUAL matched file's title over the raw search query
                 if file:
-                    file_title = re.sub(r'\.\w{2,4}$', '', str(file))  # drop extension
+                    file_title = re.sub(r'\.\w{2,4}$', '', str(file))
                     file_title = re.sub(r'[_\.\-]+', ' ', file_title)
-                    # Cut off at the first year or common quality/source tag — title comes before that
                     cutoff = re.search(
                         r'\b(19\d{2}|20\d{2}|1080p|720p|480p|2160p|4k|hdrip|webrip|web-?dl|bluray|brrip|hdtv|hdcam|camrip|dual audio|multi audio|s\d{1,2}(e\d{1,3})?)\b',
                         file_title, re.IGNORECASE
@@ -173,11 +170,26 @@ async def get_movie_detailsx(query, id=False, file=None):
                     if len(file_title) >= 3:
                         q = file_title
 
-                search_params = {"api_key": TMDB_API_KEY, "query": q, "include_adult": "false"}
+                # Strip season/episode/quality noise so TMDB gets clean title
+                # (fixes wrong poster when user searches "the boys s01e07")
+                is_series_query = bool(re.search(
+                    r'\b(s(?:eason)?\s*0*\d{1,2}|e(?:pisode|p)?\s*0*\d{1,3}|\d{1,2}\s*[xX]\s*\d{1,3})\b',
+                    q, re.I,
+                ))
+                q_clean = re.sub(
+                    r'\b(s(?:eason|e|sn)?\s*0*\d{1,2}(?:\s*[ex]\s*0*\d{1,3})?|'
+                    r'e(?:pisode|p)?\s*0*\d{1,3}|'
+                    r'\d{1,2}\s*[xX]\s*\d{1,3}|'
+                    r'1080p|720p|480p|2160p|4k|web-?dl|webrip|bluray|hindi|english|tamil|telugu)\b',
+                    ' ', q, flags=re.I,
+                )
+                q_clean = re.sub(r'\s+', ' ', q_clean).strip(" -") or q
+
+                search_params = {"api_key": TMDB_API_KEY, "query": q_clean, "include_adult": "false"}
                 async with session.get(f"{tmdb_base}/search/multi", params=search_params) as resp:
                     if resp.status != 200:
                         text = await resp.text()
-                        logger.error(f"TMDB search failed [{resp.status}] for query={q}\n{text}")
+                        logger.error(f"TMDB search failed [{resp.status}] for query={q_clean}\n{text}")
                         return None
                     search_data = await resp.json()
 
@@ -192,6 +204,27 @@ async def get_movie_detailsx(query, id=False, file=None):
                     ]
                     if matched:
                         results = matched
+
+                # Prefer TV results for series-like queries, movies otherwise
+                if is_series_query:
+                    tv_first = [r for r in results if r.get("media_type") == "tv"]
+                    if tv_first:
+                        results = tv_first + [r for r in results if r.get("media_type") != "tv"]
+                else:
+                    movie_first = [r for r in results if r.get("media_type") == "movie"]
+                    if movie_first:
+                        results = movie_first + [r for r in results if r.get("media_type") != "movie"]
+
+                # Prefer exact / closest title match
+                q_low = q_clean.lower()
+                def _score(r):
+                    name = (r.get("title") or r.get("name") or "").lower()
+                    if name == q_low:
+                        return 0
+                    if q_low in name or name in q_low:
+                        return 1
+                    return 2
+                results.sort(key=_score)
 
                 top = results[0]
                 media_type = top.get("media_type")
@@ -271,7 +304,10 @@ async def get_movie_detailsx(query, id=False, file=None):
     details['distributors'] = [c.get('name') for c in (data.get('production_companies') or [])]
     details['seasons'] = data.get('number_of_seasons')
 
-    details['poster_url'] = f"{img_base}/w780{poster_path}" if poster_path else None
+    # Use larger main poster (original when possible) — never rely on backdrop as primary
+    details['poster_url'] = f"{img_base}/original{poster_path}" if poster_path else (
+        f"{img_base}/w1280{backdrop_path}" if backdrop_path else None
+    )
     details['backdrop_url'] = f"{img_base}/w1280{backdrop_path}" if backdrop_path else None
 
     return details
