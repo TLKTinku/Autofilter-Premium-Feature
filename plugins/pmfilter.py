@@ -125,36 +125,81 @@ def _pro_file_parts(file):
         title = re.sub(r"\bS\d{1,2}E\d{1,3}\b", " ", title, flags=re.I)
         title = re.sub(r"\s+", " ", title).strip(" -._")
     title = title.title() if title else "File"
-    if len(title) > 60:
-        title = title[:59].rstrip() + "…"
+    # Keep title short so SxxExx + quality stay visible at the front
+    if len(title) > 22:
+        title = title[:21].rstrip() + "…"
 
-    meta = " • ".join(x for x in (episode, quality, language, size) if x) or size
-    return title, meta
+    # Priority order: Episode → Quality → Lang → Size  (name added separately in button)
+    meta = " · ".join(x for x in (episode, quality, language, size) if x) or size
+    return title, meta, episode, quality
 
 
 def _pro_file_btn(file):
-    """Single-line fallback (rarely used). Prefer _file_btn_rows."""
-    title, meta = _pro_file_parts(file)
-    label = f"🎬 {title} | {meta}"
+    """Single-line fallback."""
+    title, meta, episode, quality = _pro_file_parts(file)
+    head = " · ".join(x for x in (episode, quality) if x)
+    if head:
+        label = f"📥 {head} · {title} · {meta.split(' · ')[-1] if meta else ''}".strip(" ·")
+    else:
+        label = f"📥 {title} · {meta}"
     return label[:64]
 
 
 def _file_btn_rows(file):
     """
-    Single full-width button (biggest Telegram allows, 1 row only):
-      [🎬 The Boys · S01E07 · 720P · Hin · 762MB]
-    Name shortened so quality/size always fit (64-char limit).
+    Single full-width button — SxxExx + quality FIRST so they never get cut:
+      [📥 S01E07 · 720P · Hin · The Boys · 762MB]
+    Name is shortened; episode/quality always kept.
     """
-    title, meta = _pro_file_parts(file)
+    title, meta, episode, quality = _pro_file_parts(file)
     cb = f"file#{file.file_id}"
-    prefix = "🎬 "
-    room = 64 - len(prefix) - len(meta) - 3  # " · "
-    if room < 6:
-        label = f"{prefix}{meta}"[:64]
+    # Build head (must keep) then soft parts
+    head_parts = [x for x in (episode, quality) if x]
+    head = " · ".join(head_parts)
+    # remaining: lang + size already in meta after episode/quality
+    # meta = episode · quality · lang · size
+    rest_parts = []
+    if meta:
+        for p in meta.split(" · "):
+            if p and p not in head_parts and p != title:
+                rest_parts.append(p)
+    # Order: HEAD · title · rest  (head never truncated)
+    prefix = "📥 "
+    if head:
+        fixed = f"{prefix}{head} · "
     else:
-        short = title if len(title) <= room else (title[: room - 1].rstrip() + "…")
-        label = f"{prefix}{short} · {meta}"[:64]
+        fixed = prefix
+    room = 64 - len(fixed)
+    # Prefer title then lang/size
+    tail_bits = [title] + rest_parts
+    tail = " · ".join(tail_bits)
+    if len(tail) > room:
+        # keep size (last rest part) if possible
+        size_part = rest_parts[-1] if rest_parts else ""
+        lang_parts = rest_parts[:-1] if len(rest_parts) > 1 else []
+        budget = room - (len(size_part) + 3 if size_part else 0)
+        name_budget = max(budget - (len(" · ".join(lang_parts)) + 3 if lang_parts else 0), 6)
+        short_title = title if len(title) <= name_budget else (title[: name_budget - 1].rstrip() + "…")
+        pieces = [short_title] + lang_parts
+        if size_part:
+            pieces.append(size_part)
+        tail = " · ".join(pieces)[:room]
+    label = (fixed + tail)[:64]
     return [[InlineKeyboardButton(label, callback_data=cb)]]
+
+
+def _text_file_line(file, idx, chat_id):
+    """Pretty text-mode row: SxxExx · quality first, then short name + size."""
+    title, meta, episode, quality = _pro_file_parts(file)
+    head = " · ".join(x for x in (episode, quality) if x)
+    size = get_size(getattr(file, "file_size", 0) or 0)
+    if head:
+        shown = f"{head} · {title} · {size}"
+    else:
+        shown = f"{title} · {meta}" if meta else title
+    link = f"https://telegram.me/{temp.U_NAME}?start=file_{chat_id}_{file.file_id}"
+    return f"<b>{idx}. <a href='{link}'>{shown}</a></b>\n"
+
 
 logger.setLevel(logging.ERROR)
 
@@ -2738,45 +2783,48 @@ async def auto_filter(client, msg, spoll=False):
             )
             temp.IMDB_CAP[message.from_user.id] = cap
             if not settings.get('button'):
-                cap += "\n\n<b><u>Your Requested Files Are Here</u></b>\n\n"
+                cap += "\n\n<b>📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>\n"
                 for idx, file in enumerate(files, start=1):
-                    cap += f"<b>\n{idx}. <a href='https://telegram.me/{temp.U_NAME}?start=file_{message.chat.id}_{file.file_id}'>[{get_size(file.file_size)}] {clean_filename(file.file_name)}\n</a></b>"
+                    cap += _text_file_line(file, idx, message.chat.id)
         else:
             temp.IMDB_CAP[message.from_user.id] = None
-            if ULTRA_FAST_MODE:
-                if settings.get('button'):
-                    cap = f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n📝 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {message.from_user.mention}\n⚜️ ᴘᴏᴡᴇʀᴇᴅ ʙʏ : ⚡ {message.chat.title or temp.B_LINK or 'iP Update'} \n\n<u>Your Requested Files Are Here</u> \n\n</b>"
-                else:
-                    cap = f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n📝 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {message.from_user.mention}\n⚜️ ᴘᴏᴡᴇʀᴇᴅ ʙʏ : ⚡ {message.chat.title or temp.B_LINK or 'iP Update'} \n\n<u>Your Requested Files Are Here</u> \n\n</b>"
-                    for idx, file in enumerate(files, start=1):
-                        cap += f"<b>\n{idx}. <a href='https://telegram.me/{temp.U_NAME}?start=file_{message.chat.id}_{file.file_id}'>[{get_size(file.file_size)}] {clean_filename(file.file_name)}\n</a></b>"
+            header = (
+                f"<b>🎬 <code>{search}</code></b>\n"
+                f"📁 {total_results} files · ⏱ {remaining_seconds}s\n"
+                f"👤 {message.from_user.mention}\n"
+            )
+            if settings.get('button'):
+                cap = header + "\n<b>📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>\n"
             else:
-                if settings.get('button'):
-                    cap = f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n🧱 ᴛᴏᴛᴀʟ ꜰɪʟᴇꜱ : <code>{total_results}</code>\n⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n📝 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {message.from_user.mention}\n⚜️ ᴘᴏᴡᴇʀᴇᴅ ʙʏ : ⚡ {message.chat.title or temp.B_LINK or 'iP Update'} \n\n<u>Your Requested Files Are Here</u> \n\n</b>"
-                else:
-                    cap = f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n🧱 ᴛᴏᴛᴀʟ ꜰɪʟᴇꜱ : <code>{total_results}</code>\n⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n📝 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {message.from_user.mention}\n⚜️ ᴘᴏᴡᴇʀᴇᴅ ʙʏ : ⚡ {message.chat.title or temp.B_LINK or 'iP Update'} \n\n<u>Your Requested Files Are Here</u> \n\n</b>"
-
-                    for idx, file in enumerate(files, start=1):
-                        cap += f"<b>\n{idx}. <a href='https://telegram.me/{temp.U_NAME}?start=file_{message.chat.id}_{file.file_id}'>[{get_size(file.file_size)}] {clean_filename(file.file_name)}\n</a></b>"
+                cap = header + "\n<b>📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>\n"
+                for idx, file in enumerate(files, start=1):
+                    cap += _text_file_line(file, idx, message.chat.id)
 
         # PRO title-group UI disabled — always show direct file buttons
         sent = None
         try:
-            if imdb and imdb.get('poster'):
+            # Always prefer MAIN movie poster (not landscape backdrop)
+            photo = (imdb.get('poster') if imdb else None) or (imdb.get('backdrop') if imdb else None)
+            if photo:
                 try:
-                    if TMDB_POSTER:
-                        photo = imdb.get('backdrop') if imdb.get('backdrop') and LANDSCAPE_POSTER else imdb.get('poster')
-                    else:
-                        photo = imdb.get('poster')
                     sent = await message.reply_photo(photo=photo, caption=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), parse_mode=enums.ParseMode.HTML)
                     if m:
                         await m.delete()
                 except (MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty):
-                    pic = imdb.get('poster')
-                    poster = pic.replace('.jpg', "._V1_UX360.jpg")
-                    sent = await message.reply_photo(photo=poster, caption=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), parse_mode=enums.ParseMode.HTML)
+                    pic = (imdb or {}).get('poster') or (imdb or {}).get('backdrop')
+                    try:
+                        if pic:
+                            alt = pic.replace('.jpg', "._V1_UX360.jpg") if '.jpg' in pic else pic
+                            sent = await message.reply_photo(photo=alt, caption=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), parse_mode=enums.ParseMode.HTML)
+                        else:
+                            sent = await message.reply_text(text=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
+                    except Exception:
+                        sent = await message.reply_text(text=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
                     if m:
-                        await m.delete()
+                        try:
+                            await m.delete()
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.exception(e)
                     sent = await message.reply_text(text=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
