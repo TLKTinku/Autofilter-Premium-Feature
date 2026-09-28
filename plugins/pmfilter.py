@@ -56,8 +56,8 @@ def _pro_bullets(value):
     return re.sub(r"\s*,\s*", " • ", str(value).strip())
 
 
-def _pro_file_btn(file):
-    """File label. Priority: Episode -> Quality -> Language -> Size."""
+def _pro_file_parts(file):
+    """Return (title, meta) for a file. Used for 2-row buttons."""
     name = clean_filename(getattr(file, "file_name", None) or "File")
     raw = name.lower().replace("_", " ").replace(".", " ")
     size = get_size(getattr(file, "file_size", 0) or 0)
@@ -75,7 +75,6 @@ def _pro_file_btn(file):
             quality = show
             break
 
-    # Episode first: exact SxxExx, else "Ep 05"/"E05" (with season if known), else season only.
     episode = ""
     m = re.search(r"\bS(?:0?\d{1,2})\s*E(?:0?\d{1,3})\b", raw, re.I)
     if m:
@@ -95,21 +94,64 @@ def _pro_file_btn(file):
         elif season_m:
             episode = f"S{int(season_m.group(1)):02d}"
 
-    # Detect common language tags without exposing the long filename.
     langs = []
     language_map = (
-        ("hindi", "Hindi"), ("english", "English"), ("tamil", "Tamil"),
-        ("telugu", "Telugu"), ("malayalam", "Malayalam"), ("kannada", "Kannada"),
-        ("punjabi", "Punjabi"), ("gujarati", "Gujarati"), ("marathi", "Marathi"),
-        ("bengali", "Bengali"), ("multi audio", "Multi Audio"), ("dual audio", "Dual Audio"),
+        ("hindi", "Hin"), ("english", "Eng"), ("tamil", "Tam"),
+        ("telugu", "Tel"), ("malayalam", "Mal"), ("kannada", "Kan"),
+        ("punjabi", "Pun"), ("gujarati", "Guj"), ("marathi", "Mar"),
+        ("bengali", "Ben"), ("multi audio", "Multi"), ("dual audio", "Dual"),
     )
     for token, label in language_map:
         if token in raw and label not in langs:
             langs.append(label)
     language = "/".join(langs[:2])
 
-    parts = [x for x in (episode, quality, language, size) if x]
-    return "🎞 " + " • ".join(parts) if parts else "🎞 " + size
+    title = re.sub(r"\.[A-Za-z0-9]{1,8}$", "", name)
+    title = re.sub(r"[._]+", " ", title)
+    title = re.sub(
+        r"\b(?:2160p|1440p|1080p|720p|480p|360p|4k|web[- ]?dl|webrip|web|bluray|blu[- ]?ray|"
+        r"brrip|hdrip|hdtv|x264|x265|hevc|av1|aac|dts|atmos|dd[p]?\d*|ac3|eac3|"
+        r"dual[- ]?audio|multi[- ]?audio|hindi|english|tamil|telugu|malayalam|kannada|"
+        r"punjabi|gujarati|marathi|bengali|mkv|mp4|avi|mov|yts|ssfilms|"
+        r"5\.1|2\.0|7\.1|10bit|8bit|hdr|sdr)\b",
+        " ",
+        title,
+        flags=re.I,
+    )
+    title = re.sub(r"\b(?:5|2|7)\s+1\b", " ", title)
+    title = re.sub(r"(?<!\d)\b[0-9]\b(?!\d)", " ", title)
+    title = re.sub(r"\s+", " ", title).strip(" -._")
+    if episode:
+        title = re.sub(r"\bS\d{1,2}E\d{1,3}\b", " ", title, flags=re.I)
+        title = re.sub(r"\s+", " ", title).strip(" -._")
+    title = title.title() if title else "File"
+    if len(title) > 60:
+        title = title[:59].rstrip() + "…"
+
+    meta = " • ".join(x for x in (episode, quality, language, size) if x) or size
+    return title, meta
+
+
+def _pro_file_btn(file):
+    """Single-line fallback (rarely used). Prefer _file_btn_rows."""
+    title, meta = _pro_file_parts(file)
+    label = f"🎬 {title} | {meta}"
+    return label[:64]
+
+
+def _file_btn_rows(file):
+    """
+    Two rows per file (Telegram buttons are single-line only):
+      🎬 The Boys
+      📥 S01E07 • 720P • Hin/Eng • 762.9 MB
+    Both rows open the same file.
+    """
+    title, meta = _pro_file_parts(file)
+    cb = f"file#{file.file_id}"
+    return [
+        [InlineKeyboardButton(f"🎬 {title}"[:64], callback_data=cb)],
+        [InlineKeyboardButton(f"📥 {meta}"[:64], callback_data=cb)],
+    ]
 
 logger.setLevel(logging.ERROR)
 
@@ -265,10 +307,8 @@ def _pro_detail_markup(key, files, next_offset, total_results, req):
             InlineKeyboardButton("📺 Season", callback_data=f"seasons#{key}"),
         ],
     ]
-    rows.extend([
-        [InlineKeyboardButton(_pro_file_btn(file), callback_data=f"file#{file.file_id}")]
-        for file in files
-    ])
+    for file in files:
+        rows.extend(_file_btn_rows(file))
 
     nav = []
     if len((PRO_DETAIL.get(key) or {}).get("history", [0])) > 1:
@@ -801,12 +841,9 @@ async def next_page(bot, query):
     temp.SHORT[query.from_user.id] = query.message.chat.id
     settings = await get_settings(query.message.chat.id)
     if settings.get('button'):
-        btn = [
-            [
-                InlineKeyboardButton(text=_pro_file_btn(file), callback_data=f'file#{file.file_id}'),
-            ]
-            for file in files
-        ]
+        btn = []
+        for file in files:
+            btn.extend(_file_btn_rows(file))
         btn.insert(0,
                    [
                        InlineKeyboardButton(
@@ -1079,12 +1116,9 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
     temp.GETALL[key] = files
     settings = await get_settings(message.chat.id)
     if settings.get('button'):
-        btn = [
-            [
-                InlineKeyboardButton(text=_pro_file_btn(file), callback_data=f'file#{file.file_id}'),
-            ]
-            for file in files
-        ]
+        btn = []
+        for file in files:
+            btn.extend(_file_btn_rows(file))
         btn.insert(0,
                    [
                        InlineKeyboardButton(
@@ -1239,12 +1273,9 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
     temp.GETALL[key] = files
     settings = await get_settings(message.chat.id)
     if settings.get('button'):
-        btn = [
-            [
-                InlineKeyboardButton(text=_pro_file_btn(file), callback_data=f'file#{file.file_id}'),
-            ]
-            for file in files
-        ]
+        btn = []
+        for file in files:
+            btn.extend(_file_btn_rows(file))
         btn.insert(0,
                    [
                        InlineKeyboardButton(
@@ -1459,17 +1490,8 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
     settings = await get_settings(chat_id)
     btn: list[list[InlineKeyboardButton]] = []
     if settings.get("button"):
-        btn.extend(
-            [
-                [
-                    InlineKeyboardButton(
-                        _pro_file_btn(f),
-                        callback_data=f"file#{f.file_id}",
-                    )
-                ]
-                for f in files
-            ]
-        )
+        for f in files:
+            btn.extend(_file_btn_rows(f))
     btn.insert(
         0,
         [
@@ -2604,66 +2626,30 @@ async def auto_filter(client, msg, spoll=False):
         temp.GETALL[key] = files
         temp.SHORT[message.from_user.id] = message.chat.id
 
+        # Direct file list (PRO title-group UI disabled) — 2 rows per file
         if settings.get('button'):
-            groups, group_next_offset = await _pro_discover_groups(message.chat.id, search, files, offset)
-            PRO_SEARCH[key] = {
-                "key": key,
-                "groups": groups,
-                "title_page": 0,
-                "caption": None,
-                "query": search,
-                "chat_id": message.chat.id,
-                "user_id": message.from_user.id if message.from_user else 0,
-                "group_next_offset": group_next_offset,
-                "total_results": total_results,
-                "meta": None,
-            }
-
-        if settings.get('button'):
-            btn = [
-                [
-                    InlineKeyboardButton(text=f"🔗 {get_size(file.file_size)} ≽ " + clean_filename(
-                        file.file_name), callback_data=f'file#{file.file_id}'),
-                ]
-                for file in files
-            ]
-            btn.insert(0,
-                       [
-                           InlineKeyboardButton(
-                               "🎚 Quality", callback_data=f"qualities#{key}"),
-                           InlineKeyboardButton(
-                               "🌐 Language", callback_data=f"languages#{key}"),
-                           InlineKeyboardButton(
-                               "📺 Season",  callback_data=f"seasons#{key}")
-                       ]
-                       )
-            btn.insert(0,
-                       [
-                           InlineKeyboardButton(
-                               "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
-                           InlineKeyboardButton(
-                               "📦 Send All", callback_data=f"sendfiles#{key}")
-
-                       ])
+            btn = []
+            for file in files:
+                btn.extend(_file_btn_rows(file))
         else:
             btn = []
-            btn.insert(0,
-                       [
-                           InlineKeyboardButton(
-                               "🎚 Quality", callback_data=f"qualities#{key}"),
-                           InlineKeyboardButton(
-                               "🌐 Language", callback_data=f"languages#{key}"),
-                           InlineKeyboardButton(
-                               "📺 Season",  callback_data=f"seasons#{key}")
-                       ]
-                       )
-            btn.insert(0,
-                       [
-                           InlineKeyboardButton(
-                               "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
-                           InlineKeyboardButton(
-                               "📦 Send All", callback_data=f"sendfiles#{key}")
-                       ])
+        btn.insert(0,
+                   [
+                       InlineKeyboardButton(
+                           "🎚 Quality", callback_data=f"qualities#{key}"),
+                       InlineKeyboardButton(
+                           "🌐 Language", callback_data=f"languages#{key}"),
+                       InlineKeyboardButton(
+                           "📺 Season",  callback_data=f"seasons#{key}")
+                   ]
+                   )
+        btn.insert(0,
+                   [
+                       InlineKeyboardButton(
+                           "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+                       InlineKeyboardButton(
+                           "📦 Send All", callback_data=f"sendfiles#{key}")
+                   ])
 
         if offset != "":
             req = message.from_user.id if message.from_user else 0
@@ -2770,14 +2756,7 @@ async def auto_filter(client, msg, spoll=False):
                     for idx, file in enumerate(files, start=1):
                         cap += f"<b>\n{idx}. <a href='https://telegram.me/{temp.U_NAME}?start=file_{message.chat.id}_{file.file_id}'>[{get_size(file.file_size)}] {clean_filename(file.file_name)}\n</a></b>"
 
-        # Phase-3 title-first UI: clean text-only search page.
-        is_pro_search = settings.get('button') and key in PRO_SEARCH
-        if is_pro_search:
-            PRO_SEARCH[key]["meta"] = imdb or {}
-            PRO_SEARCH[key]["caption"] = _pro_search_caption(PRO_SEARCH[key])
-            cap = PRO_SEARCH[key]["caption"]
-            btn = _pro_search_markup(PRO_SEARCH[key])
-
+        # PRO title-group UI disabled — always show direct file buttons
         sent = None
         try:
             if imdb and imdb.get('poster'):
