@@ -8,8 +8,6 @@ import asyncio
 import string
 import pytz
 from .pmfilter import auto_filter 
-# Register MY MOVIES UI callback handlers during bot startup.
-from plugins import ui_pro as _ui_pro_bootstrap
 from Script import script
 from datetime import datetime
 from database.refer import referdb
@@ -30,18 +28,6 @@ logger = logging.getLogger(__name__)
 
 TIMEZONE = "Asia/Kolkata"
 BATCH_FILES = {}
-
-
-def _valid_button_url(value):
-    """Return a URL safe for Telegram InlineKeyboardButton.url, or None."""
-    value = str(value or "").strip()
-    if not value:
-        return None
-    if not (value.startswith("https://") or value.startswith("http://") or value.startswith("tg://")):
-        return None
-    if any(ch in value for ch in "\r\n\t"):
-        return None
-    return value
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
@@ -112,7 +98,7 @@ async def start(client, message):
         await db.add_user(message.from_user.id, message.from_user.first_name)
         await client.send_message(LOG_CHANNEL, script.LOG_TEXT_P.format(message.from_user.id, message.from_user.mention))
     if len(message.command) != 2:
-        from plugins.ui_pro import home_kb, home_text
+        from plugins.ui_pro import home_kb
         buttons = None
         reply_markup = home_kb()
         current_time = datetime.now(pytz.timezone(TIMEZONE))
@@ -130,14 +116,14 @@ async def start(client, message):
         await m.delete()        
         await message.reply_photo(
             photo=random.choice(PICS),
-            caption=home_text(message.from_user.mention),
+            caption=script.START_TXT.format(message.from_user.mention, gtxt, temp.U_NAME, temp.B_NAME),
             reply_markup=reply_markup,
             parse_mode=enums.ParseMode.HTML
         )
         return
 
     if len(message.command) == 2 and message.command[1] in ["subscribe", "error", "okay", "help"]:
-        from plugins.ui_pro import home_kb, home_text
+        from plugins.ui_pro import home_kb
         buttons = None
         reply_markup = home_kb()
         current_time = datetime.now(pytz.timezone(TIMEZONE))
@@ -155,7 +141,7 @@ async def start(client, message):
         await m.delete()        
         await message.reply_photo(
             photo=random.choice(PICS),
-            caption=home_text(message.from_user.mention),
+            caption=script.START_TXT.format(message.from_user.mention, gtxt, temp.U_NAME, temp.B_NAME),
             reply_markup=reply_markup,
             parse_mode=enums.ParseMode.HTML
         )
@@ -203,14 +189,19 @@ async def start(client, message):
         return
         
     if len(message.command) == 2 and message.command[1] in ["premium"]:
-        from plugins.ui_pro import premium_overview_text, premium_overview_kb
+        buttons = [[
+                    InlineKeyboardButton('📲 ꜱᴇɴᴅ ᴘᴀʏᴍᴇɴᴛ ꜱᴄʀᴇᴇɴꜱʜᴏᴛ', url=OWNER_LNK)
+                  ],[
+                    InlineKeyboardButton('❌ ᴄʟᴏꜱᴇ ❌', callback_data='close_data')
+                  ]]
+        reply_markup = InlineKeyboardMarkup(buttons)
         await message.reply_photo(
-            photo=SUBSCRIPTION,
-            caption=premium_overview_text(),
-            reply_markup=premium_overview_kb(),
-            parse_mode=enums.ParseMode.HTML,
+            photo=(SUBSCRIPTION),
+            caption=script.PREPLANS_TXT.format(message.from_user.mention, OWNER_UPI_ID, QR_CODE),
+            reply_markup=reply_markup,
+            parse_mode=enums.ParseMode.HTML
         )
-        return
+        return  
     
     if len(message.command) == 2 and message.command[1].startswith('getfile'):
         movies = message.command[1].split("-", 1)[1] 
@@ -297,24 +288,11 @@ async def start(client, message):
                     howtodownload = settings.get('tutorial_3', TUTORIAL_3)
                 else:
                     howtodownload = settings.get('tutorial_2', TUTORIAL_2) if is_second_shortener else settings.get('tutorial', TUTORIAL)
-
-                # Telegram rejects an InlineKeyboardButton when ANY url is empty/malformed.
-                # The shortener URL can be valid while the optional tutorial URL is blank.
-                verify_url = _valid_button_url(verify)
-                tutorial_url = _valid_button_url(howtodownload)
-                if not verify_url:
-                    print(f"WARNING: verification URL rejected locally: {verify!r}")
-                    verify_url = raw_link
-
                 buttons = [[
-                    InlineKeyboardButton(text="♻️ ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴠᴇʀɪꜰʏ ♻️", url=verify_url)
+                    InlineKeyboardButton(text="♻️ ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴠᴇʀɪꜰʏ ♻️", url=verify)
+                ],[
+                    InlineKeyboardButton(text="⁉️ ʜᴏᴡ ᴛᴏ ᴠᴇʀɪꜰʏ ⁉️", url=howtodownload)
                 ]]
-                if tutorial_url:
-                    buttons.append([
-                        InlineKeyboardButton(text="⁉️ ʜᴏᴡ ᴛᴏ ᴠᴇʀɪꜰʏ ⁉️", url=tutorial_url)
-                    ])
-                else:
-                    print(f"INFO: tutorial URL is empty/invalid; hiding tutorial button: {howtodownload!r}")
                 reply_markup=InlineKeyboardMarkup(buttons)
                 if await db.user_verified(user_id): 
                     msg = script.THIRDT_VERIFICATION_TEXT
