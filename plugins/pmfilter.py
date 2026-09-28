@@ -201,6 +201,36 @@ def _text_file_line(file, idx, chat_id):
     return f"<b>{idx}. <a href='{link}'>{shown}</a></b>\n"
 
 
+def _attach_request_btn(btn, key, search, user):
+    """Bottom Request Owner button — same flow as when no files found."""
+    if not user:
+        return btn
+    OWNER_REQ_CACHE[key] = {
+        "query": search,
+        "user_id": user.id,
+        "mention": user.mention,
+    }
+    btn.append([
+        InlineKeyboardButton(
+            "📩 ʀᴇǫᴜᴇsᴛ ᴏᴡɴᴇʀ",
+            callback_data=f"reqowner#{key}",
+        )
+    ])
+    return btn
+
+
+def _result_header(search, total_results, remaining_seconds, user, chat_title=None):
+    """Clean result caption header."""
+    name = user.mention if user else "User"
+    total = total_results if total_results not in (None, "") else "—"
+    return (
+        f"<b>🏷 ᴛɪᴛʟᴇ :</b> <code>{search}</code>\n"
+        f"<b>📁 ꜰɪʟᴇs :</b> <code>{total}</code>\n"
+        f"<b>⏱ ᴛɪᴍᴇ :</b> <code>{remaining_seconds}s</code>\n"
+        f"<b>👤 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ :</b> {name}\n"
+    )
+
+
 logger.setLevel(logging.ERROR)
 
 tracemalloc.start()
@@ -1027,6 +1057,7 @@ async def next_page(bot, query):
                             "Next ›", callback_data=f"next_{req}_{key}_{n_offset}")
                     ],
                 )
+    _attach_request_btn(btn, key, search, query.from_user)
     if not settings["button"]:
         cur_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
         time_difference = timedelta(hours=cur_time.hour, minutes=cur_time.minute, seconds=(cur_time.second+(cur_time.microsecond/1000000))) - \
@@ -1231,6 +1262,7 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
             [InlineKeyboardButton(
                 text="✓ No more pages", callback_data="pages")]
         )
+    _attach_request_btn(btn, key, search, query.from_user)
     if not settings["button"]:
         cur_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
         time_difference = timedelta(hours=cur_time.hour, minutes=cur_time.minute, seconds=(cur_time.second+(cur_time.microsecond/1000000))) - \
@@ -1384,6 +1416,7 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
     else:
         btn.append([InlineKeyboardButton(
             text="✓ No more pages", callback_data="pages")])
+    _attach_request_btn(btn, key, search, query.from_user)
     if not settings["button"]:
         cur_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
         time_difference = timedelta(hours=cur_time.hour, minutes=cur_time.minute, seconds=(cur_time.second+(cur_time.microsecond/1000000))) - \
@@ -1581,6 +1614,7 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
             [InlineKeyboardButton(
                 "✓ No more pages", callback_data="pages")]
         )
+    _attach_request_btn(btn, key, search_final, query.from_user)
     if not settings.get("button"):
         curr_time = datetime.now(pytz.timezone("Asia/Kolkata")).time()
         time_difference = timedelta(
@@ -2728,10 +2762,15 @@ async def auto_filter(client, msg, spoll=False):
             btn.append([InlineKeyboardButton(
                 text="✓ No more pages", callback_data="pages")])
 
+        # Request button on every result (same as no-file flow)
+        _attach_request_btn(btn, key, search, message.from_user)
+
+        imdb = None
         if settings.get('imdb'):
-            imdb = await get_posterx(search, file=(files[0]).file_name) if TMDB_POSTER else await get_poster(search, file=(files[0]).file_name)
-        else:
-            imdb = None
+            try:
+                imdb = await get_posterx(search, file=(files[0]).file_name) if TMDB_POSTER else await get_poster(search, file=(files[0]).file_name)
+            except Exception:
+                imdb = None
 
         cur_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
         time_difference = timedelta(hours=cur_time.hour, minutes=cur_time.minute, seconds=(cur_time.second+(cur_time.microsecond/1000000))) - \
@@ -2788,15 +2827,11 @@ async def auto_filter(client, msg, spoll=False):
                     cap += _text_file_line(file, idx, message.chat.id)
         else:
             temp.IMDB_CAP[message.from_user.id] = None
-            header = (
-                f"<b>🎬 <code>{search}</code></b>\n"
-                f"📁 {total_results} files · ⏱ {remaining_seconds}s\n"
-                f"👤 {message.from_user.mention}\n"
-            )
+            cap = _result_header(search, total_results, remaining_seconds, message.from_user)
             if settings.get('button'):
-                cap = header + "\n<b>📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>\n"
+                cap += "\n<b>📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>  <i>(buttons below)</i>\n"
             else:
-                cap = header + "\n<b>📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>\n"
+                cap += "\n<b>📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>\n"
                 for idx, file in enumerate(files, start=1):
                     cap += _text_file_line(file, idx, message.chat.id)
 
