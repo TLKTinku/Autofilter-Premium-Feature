@@ -304,10 +304,11 @@ async def get_movie_detailsx(query, id=False, file=None):
     details['distributors'] = [c.get('name') for c in (data.get('production_companies') or [])]
     details['seasons'] = data.get('number_of_seasons')
 
-    # Use larger main poster (original when possible) — never rely on backdrop as primary
-    details['poster_url'] = f"{img_base}/original{poster_path}" if poster_path else (
-        f"{img_base}/w1280{backdrop_path}" if backdrop_path else None
+    # Main poster at Telegram-friendly size (w780). original often fails upload.
+    details['poster_url'] = f"{img_base}/w780{poster_path}" if poster_path else (
+        f"{img_base}/w780{backdrop_path}" if backdrop_path else None
     )
+    details['poster_url_hq'] = f"{img_base}/original{poster_path}" if poster_path else None
     details['backdrop_url'] = f"{img_base}/w1280{backdrop_path}" if backdrop_path else None
 
     return details
