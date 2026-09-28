@@ -27,22 +27,55 @@ lock = asyncio.Lock()
 logger = logging.getLogger(__name__)
 
 
+def _pro_header(title):
+    """Shared MY MOVIES header used on every PRO screen."""
+    return (
+        "╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"        <b>{title}</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━━━╯"
+    )
+
+
+_PRO_LINE = "━━━━━━━━━━━━━━━━━━━━━━"
+_PRO_EMPTY_VALUES = {"", "n/a", "na", "none", "null", "0", "0.0", "0 min", "unknown", "nᴏᴛ aᴠᴀɪʟᴀʙʟᴇ"}
+
+
+def _pro_known(value):
+    """True only when a metadata value is real (no N/A walls on the UI)."""
+    if value is None:
+        return False
+    if isinstance(value, (list, tuple, set)):
+        return any(_pro_known(v) for v in value)
+    return str(value).strip().lower() not in _PRO_EMPTY_VALUES
+
+
+def _pro_bullets(value):
+    """'Action, Adventure' / ['Action', 'Adventure'] -> 'Action • Adventure'."""
+    if isinstance(value, (list, tuple, set)):
+        return " • ".join(str(v).strip() for v in value if _pro_known(v))
+    return re.sub(r"\s*,\s*", " • ", str(value).strip())
+
+
 def _pro_file_btn(file):
-    """Compact, useful file label: quality, language, episode/season, size."""
+    """File label. Priority: Episode -> Quality -> Language -> Size."""
     name = clean_filename(getattr(file, "file_name", None) or "File")
     raw = name.lower().replace("_", " ").replace(".", " ")
     size = get_size(getattr(file, "file_size", 0) or 0)
 
     quality = ""
-    for tag, show in ((
+    for tag, show in (
         ("2160p", "4K"), ("4k", "4K"), ("1440p", "1440P"),
         ("1080p", "1080P"), ("720p", "720P"), ("480p", "480P"), ("360p", "360P"),
-    )):
-        if tag in raw:
+    ):
+        if tag.endswith("p"):
+            pattern = rf"(?<!\d){tag}"
+        else:
+            pattern = rf"(?<![a-z0-9]){tag}(?![a-z0-9])"
+        if re.search(pattern, raw):
             quality = show
             break
 
-    # Prefer an exact episode token; otherwise show season when present.
+    # Episode first: exact SxxExx, else "Ep 05"/"E05" (with season if known), else season only.
     episode = ""
     m = re.search(r"\bS(?:0?\d{1,2})\s*E(?:0?\d{1,3})\b", raw, re.I)
     if m:
@@ -51,9 +84,16 @@ def _pro_file_btn(file):
         em = re.search(r"E(\d+)", token)
         episode = f"S{int(sm.group(1)):02d}E{int(em.group(1)):02d}" if sm and em else token
     else:
-        m = re.search(r"\bS(?:eason\s*)?(0?\d{1,2})\b", raw, re.I)
-        if m:
-            episode = f"S{int(m.group(1)):02d}"
+        season_m = re.search(r"\bS(?:eason\s*)?(0?\d{1,2})\b", raw, re.I)
+        ep_m = re.search(r"\b(?:episode|ep)\s*0*(\d{1,3})\b|\be0*(\d{1,3})\b", raw, re.I)
+        if ep_m:
+            ep_num = int(ep_m.group(1) or ep_m.group(2))
+            if season_m:
+                episode = f"S{int(season_m.group(1)):02d}E{ep_num:02d}"
+            else:
+                episode = f"E{ep_num:02d}"
+        elif season_m:
+            episode = f"S{int(season_m.group(1)):02d}"
 
     # Detect common language tags without exposing the long filename.
     langs = []
@@ -68,8 +108,8 @@ def _pro_file_btn(file):
             langs.append(label)
     language = "/".join(langs[:2])
 
-    parts = [x for x in (quality, language, episode, size) if x]
-    return "•".join(parts) if parts else size
+    parts = [x for x in (episode, quality, language, size) if x]
+    return "🎞 " + " • ".join(parts) if parts else "🎞 " + size
 
 logger.setLevel(logging.ERROR)
 
@@ -178,12 +218,12 @@ async def _pro_discover_groups(chat_id, search, first_files, first_offset):
 
 
 def _pro_search_markup(state):
-    """First page: title buttons only. No file controls here by design."""
+    """First page: clean movie-title buttons only. No file controls here by design."""
     groups = state.get("groups", [])
     page = int(state.get("title_page", 0))
     start = page * PRO_TITLE_PAGE
     end = start + PRO_TITLE_PAGE
-    visible = groups[start:end]
+    total_pages = max(1, math.ceil(len(groups) / PRO_TITLE_PAGE))
 
     rows = []
     for idx in range(start, end):
@@ -192,17 +232,18 @@ def _pro_search_markup(state):
         group = groups[idx]
         rows.append([
             InlineKeyboardButton(
-                f"🎬 {group['title']}  ·  {group['count']} file{'s' if group['count'] != 1 else ''}",
+                f"🎬 {group['title']}",
                 callback_data=f"mmt#{state['key']}#{idx}",
             )
         ])
 
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton("‹ Previous", callback_data=f"mmprev#{state['key']}"))
-    if end < len(groups):
-        nav.append(InlineKeyboardButton("Next ›", callback_data=f"mmnext#{state['key']}"))
-    if nav:
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("◀ Previous", callback_data=f"mmprev#{state['key']}"))
+        nav.append(InlineKeyboardButton(f"{page + 1} / {total_pages}", callback_data="pages"))
+        if end < len(groups):
+            nav.append(InlineKeyboardButton("Next ▶", callback_data=f"mmnext#{state['key']}"))
         rows.append(nav)
 
     rows.append([
@@ -230,8 +271,10 @@ def _pro_detail_markup(key, files, next_offset, total_results, req):
     ])
 
     nav = []
+    if len((PRO_DETAIL.get(key) or {}).get("history", [0])) > 1:
+        nav.append(InlineKeyboardButton("◀ Previous", callback_data=f"mfileprev#{key}"))
     if next_offset != "":
-        nav.append(InlineKeyboardButton("Next ›", callback_data=f"mfilenext#{key}#{next_offset}"))
+        nav.append(InlineKeyboardButton("Next ▶", callback_data=f"mfilenext#{key}#{next_offset}"))
     if nav:
         rows.append(nav)
     rows.append([
@@ -257,18 +300,13 @@ def _pro_search_caption(state):
     query_text = _html_escape(str(state.get("query") or "Movie"))
     page = int(state.get("title_page", 0)) + 1
     total_pages = max(1, math.ceil(len(groups) / PRO_TITLE_PAGE))
-    start = int(state.get("title_page", 0)) * PRO_TITLE_PAGE + 1
-    end = min(start + PRO_TITLE_PAGE - 1, len(groups))
-    shown = max(0, end - start + 1) if groups else 0
+    more = state.get("group_next_offset")
+    partial = "+" if more not in (None, "", 0, "0") else ""
     return (
-        "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
-        "        🎬 <b>SEARCH RESULTS</b>\n"
-        "┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+        f"{_pro_header('🎬 SEARCH')}\n\n"
         f"🔎 <b>{query_text}</b>\n"
-        f"📂 <b>{len(groups)}</b> movie titles found\n"
-        f"📄 Page <b>{page}/{total_pages}</b> • Showing <b>{shown}</b>\n\n"
-        "💡 <b>Quick Tip:</b> Movie name par tap karein —\n"
-        "   next page par available files milengi."
+        f"📚 {len(groups)}{partial} titles  •  Page {page}/{total_pages}\n\n"
+        "Tap a title to see its files."
     )
 
 
@@ -336,12 +374,12 @@ def _pro_detail_display_title(state, meta, fallback_title):
         return f"{base} — Season {int(season_number)}"
     return base
 
-def _pro_detail_caption(title, total, meta, files, display_title=None):
+def _pro_detail_caption(title, total, meta, files, display_title=None, season_number=None, episode_count=None):
+    """Movie/series hero card. Only real information is shown - never N/A."""
+    meta = meta or {}
     safe_title = _html_escape(str(display_title or meta.get("title") or title or "Movie"))
-    year = meta.get("year") or "N/A"
-    rating = meta.get("rating") or "N/A"
-    genres = meta.get("genres") or "N/A"
-    runtime = meta.get("runtime") or "N/A"
+    is_series = bool(season_number) or bool(re.search(r"\bS\d{1,2}(?:E\d{1,3})?\b", str(title or ""), re.I))
+
     combined = " ".join(
         f"{getattr(f, 'file_name', '')} {getattr(f, 'caption', '') or ''}" for f in (files or [])
     )
@@ -349,22 +387,37 @@ def _pro_detail_caption(title, total, meta, files, display_title=None):
         detected = extract_language(combined) if combined else ""
     except Exception:
         detected = ""
-    languages = detected if detected and str(detected).upper() not in {"N/A", "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ"} else (meta.get("languages") or "N/A")
-    if isinstance(languages, (list, tuple)):
-        languages = " • ".join(str(x) for x in languages if x) or "N/A"
-    return (
-        "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
-        "          🎬 <b>MOVIE</b>\n"
-        "┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
-        f"<b>{safe_title}</b>\n"
-        f"{year}\n\n"
-        f"⭐ {rating}/10\n"
-        f"🎭 {genres}\n"
-        f"⏱ {runtime}\n"
-        f"🌐 {languages}\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📂 <b>AVAILABLE FILES</b>"
-    )
+    languages = detected if _pro_known(detected) else meta.get("languages")
+
+    lines = [_pro_header("🎬 SERIES" if is_series else "🎬 MOVIE"), "", f"<b>{safe_title}</b>"]
+    if _pro_known(meta.get("year")):
+        lines.append(f"📅 {_html_escape(str(meta.get('year')))}")
+
+    info = []
+    stats = []
+    if _pro_known(meta.get("rating")):
+        stats.append(f"⭐ {_html_escape(str(meta.get('rating')))}/10")
+    if _pro_known(meta.get("runtime")):
+        stats.append(f"⏱ {_html_escape(str(meta.get('runtime')))}")
+    if stats:
+        info.append("     ".join(stats))
+    if season_number:
+        info.append(f"📺 Season {int(season_number)}")
+        try:
+            if int(episode_count or 0) > 0:
+                info.append(f"🎞 Episodes: {int(episode_count)}")
+        except (TypeError, ValueError):
+            pass
+    if _pro_known(meta.get("genres")):
+        info.append(f"🎭 {_html_escape(_pro_bullets(meta.get('genres')))}")
+    if _pro_known(languages):
+        info.append(f"🌐 {_html_escape(_pro_bullets(languages))}")
+    if info:
+        lines.append("")
+        lines.extend(info)
+
+    lines += ["", _PRO_LINE, "", "📂 <b>EPISODES</b>" if is_series else "📂 <b>AVAILABLE FILES</b>"]
+    return "\n".join(lines)
 
 
 async def _pro_show_search(client, query, key):
@@ -434,13 +487,11 @@ async def _pro_render_detail(client, query, key, offset=0, push_history=True):
 
     meta = state.get("meta") or {}
     display_title = _pro_detail_display_title(state, meta, title)
-    caption = _pro_detail_caption(title, total, meta, files, display_title=display_title)
+    caption = _pro_detail_caption(
+        title, total, meta, files, display_title=display_title,
+        season_number=state.get("season_number"), episode_count=meta.get("episode_count"),
+    )
     markup = _pro_detail_markup(key, files, next_offset, total, query.from_user.id)
-    history = state.get("history", [0])
-    if len(history) > 1:
-        markup.inline_keyboard.insert(2, [
-            InlineKeyboardButton("‹ Previous Files", callback_data=f"mfileprev#{key}")
-        ])
 
     # First visit: create a real poster message. Later pages: edit its caption/buttons.
     desired_poster = (state.get("meta") or {}).get("poster") or (state.get("meta") or {}).get("backdrop")
@@ -647,10 +698,12 @@ async def pm_text(bot, message):
 async def refercall(bot, query):
     btn = [[
         InlineKeyboardButton(
-            'invite link', url=f'https://telegram.me/share/url?url=https://t.me/{bot.me.username}?start=reff_{query.from_user.id}&text=Hello%21%20Experience%20a%20bot%20that%20offers%20a%20vast%20library%20of%20unlimited%20movies%20and%20series.%20%F0%9F%98%83'),
+            '📤 Share Invite Link', url=f'https://telegram.me/share/url?url=https://t.me/{bot.me.username}?start=reff_{query.from_user.id}&text=Hello%21%20Experience%20a%20bot%20that%20offers%20a%20vast%20library%20of%20unlimited%20movies%20and%20series.%20%F0%9F%98%83'),
         InlineKeyboardButton(
-            f'⏳ {referdb.get_refer_points(query.from_user.id)}', callback_data='ref_point'),
-        InlineKeyboardButton('Back', callback_data='premium_info')
+            f'⏳ {referdb.get_refer_points(query.from_user.id)} pts', callback_data='ref_point'),
+    ],[
+        InlineKeyboardButton('⬅️ Back', callback_data='premium_info'),
+        InlineKeyboardButton('🏠 Home', callback_data='ui_home')
     ]]
     reply_markup = InlineKeyboardMarkup(btn)
     try:
@@ -661,11 +714,22 @@ async def refercall(bot, query):
         )
     except Exception as e:    
         pass
-    await query.message.edit_text(
-        text=f'Hay Your refer link:\n\nhttps://t.me/{bot.me.username}?start=reff_{query.from_user.id}\n\nShare this link with your friends, Each time they join,  you will get 10 refferal points and after 100 points you will get 1 month premium subscription.',
-        reply_markup=reply_markup,
-        parse_mode=enums.ParseMode.HTML
+    refer_text = (
+        f"{_pro_header('🎁 REFER & EARN')}\n\n"
+        "Share your link with friends.\n"
+        "🎯 Each new user = <b>10 points</b>\n"
+        "💎 100 points = <b>1 month Premium</b>\n\n"
+        f"{_PRO_LINE}\n\n"
+        "🔗 <b>Your link</b>\n"
+        f"https://t.me/{bot.me.username}?start=reff_{query.from_user.id}"
     )
+    try:
+        if query.message.photo:
+            await query.message.edit_caption(caption=refer_text, reply_markup=reply_markup, parse_mode=enums.ParseMode.HTML)
+        else:
+            await query.message.edit_text(text=refer_text, reply_markup=reply_markup, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
+    except MessageNotModified:
+        pass
     await query.answer()
 
 @Client.on_callback_query(filters.regex(r"^mfileprev#"))
@@ -746,19 +810,19 @@ async def next_page(bot, query):
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "🎚 Quality", callback_data=f"qualities#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "🌐 Language", callback_data=f"languages#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "📺 Season",  callback_data=f"seasons#{key}")
                    ]
                    )
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+                           "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
                        InlineKeyboardButton(
-                           "✦ Send All", callback_data=f"sendfiles#{key}")
+                           "📦 Send All", callback_data=f"sendfiles#{key}")
 
                    ]
                    )
@@ -768,17 +832,17 @@ async def next_page(bot, query):
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "🎚 Quality", callback_data=f"qualities#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "🌐 Language", callback_data=f"languages#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "📺 Season",  callback_data=f"seasons#{key}")
                    ]
                    )
         btn.insert(0, [
             InlineKeyboardButton(
-                "✦ Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
-            InlineKeyboardButton("✦ Send All", callback_data=f"sendfiles#{key}")
+                "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+            InlineKeyboardButton("📦 Send All", callback_data=f"sendfiles#{key}")
         ])
     if ULTRA_FAST_MODE:
         if 0 < offset <= 10:
@@ -975,10 +1039,10 @@ async def qualities_cb_handler(client: Client, query: CallbackQuery):
         btn.append(row)
 
     btn.insert(0, [
-        InlineKeyboardButton(text="⇊ ꜱᴇʟᴇᴄᴛ ǫᴜᴀʟɪᴛʏ ⇊", callback_data="ident")
+        InlineKeyboardButton(text="🎚 Select Quality", callback_data="ident")
     ])
     btn.append([
-        InlineKeyboardButton(text="↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭",
+        InlineKeyboardButton(text="↩ Back to Files",
                              callback_data=f"fq#homepage#{key}")
     ])
 
@@ -1024,38 +1088,38 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "🎚 Quality", callback_data=f"qualities#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "🌐 Language", callback_data=f"languages#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "📺 Season",  callback_data=f"seasons#{key}")
                    ]
                    )
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+                           "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
                        InlineKeyboardButton(
-                           "✦ Send All", callback_data=f"sendfiles#{key}")
+                           "📦 Send All", callback_data=f"sendfiles#{key}")
                    ])
     else:
         btn = []
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "🎚 Quality", callback_data=f"qualities#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "🌐 Language", callback_data=f"languages#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "📺 Season",  callback_data=f"seasons#{key}")
                    ]
                    )
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+                           "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
                        InlineKeyboardButton(
-                           "✦ Send All", callback_data=f"sendfiles#{key}")
+                           "📦 Send All", callback_data=f"sendfiles#{key}")
 
                    ])
     if offset != "":
@@ -1083,7 +1147,7 @@ async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
         btn.append(
 
             [InlineKeyboardButton(
-                text="↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", callback_data="pages")]
+                text="✓ No more pages", callback_data="pages")]
         )
     if not settings["button"]:
         cur_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
@@ -1138,8 +1202,8 @@ async def languages_cb_handler(client: Client, query: CallbackQuery):
         btn.append(row)
 
     btn.insert(0, [InlineKeyboardButton(
-        text="⇊ ꜱᴇʟᴇᴄᴛ ʟᴀɴɢᴜᴀɢᴇ ⇊", callback_data="ident")])
-    btn.append([InlineKeyboardButton(text="↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭",
+        text="🌐 Select Language", callback_data="ident")])
+    btn.append([InlineKeyboardButton(text="↩ Back to Files",
                callback_data=f"fl#homepage#{key}")])
 
     btn = _pro_add_back_to_titles(btn, key)
@@ -1184,19 +1248,19 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "🎚 Quality", callback_data=f"qualities#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "🌐 Language", callback_data=f"languages#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "📺 Season",  callback_data=f"seasons#{key}")
                    ]
                    )
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+                           "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
                        InlineKeyboardButton(
-                           "✦ Send All", callback_data=f"sendfiles#{key}")
+                           "📦 Send All", callback_data=f"sendfiles#{key}")
                    ]
                    )
     else:
@@ -1204,18 +1268,18 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Quality", callback_data=f"qualities#{key}"),
+                           "🎚 Quality", callback_data=f"qualities#{key}"),
                        InlineKeyboardButton(
-                           "✦ Language", callback_data=f"languages#{key}"),
+                           "🌐 Language", callback_data=f"languages#{key}"),
                        InlineKeyboardButton(
-                           "✦ Season",  callback_data=f"seasons#{key}")
+                           "📺 Season",  callback_data=f"seasons#{key}")
                    ])
         btn.insert(0,
                    [
                        InlineKeyboardButton(
-                           "✦ Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+                           "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
                        InlineKeyboardButton(
-                           "✦ Send All", callback_data=f"sendfiles#{key}")
+                           "📦 Send All", callback_data=f"sendfiles#{key}")
                    ])
     if offset != "":
         try:
@@ -1240,7 +1304,7 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
                 ])
     else:
         btn.append([InlineKeyboardButton(
-            text="↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", callback_data="pages")])
+            text="✓ No more pages", callback_data="pages")])
     if not settings["button"]:
         cur_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
         time_difference = timedelta(hours=cur_time.hour, minutes=cur_time.minute, seconds=(cur_time.second+(cur_time.microsecond/1000000))) - \
@@ -1281,7 +1345,7 @@ async def seasons_cb_handler(client: Client, query: CallbackQuery):
     # leave the old poster and title on screen.
     if key in PRO_DETAIL:
         btn: list[list[InlineKeyboardButton]] = [[
-            InlineKeyboardButton("⇊ SELECT SEASON ⇊", callback_data="ident")
+            InlineKeyboardButton("📺 Select Season", callback_data="ident")
         ]]
         season_numbers = []
         for raw in SEASONS:
@@ -1310,16 +1374,16 @@ async def seasons_cb_handler(client: Client, query: CallbackQuery):
     for i in range(0, len(SEASONS) - 1, 2):
         btn.append([
             InlineKeyboardButton(
-                f"Sᴇᴀꜱᴏɴ {SEASONS[i][1:]}", callback_data=f"fs#{SEASONS[i].lower()}#{key}"),
+                f"📺 Season {int(SEASONS[i][1:])}", callback_data=f"fs#{SEASONS[i].lower()}#{key}"),
             InlineKeyboardButton(
-                f"Sᴇᴀꜱᴏɴ {SEASONS[i+1][1:]}", callback_data=f"fs#{SEASONS[i+1].lower()}#{key}")
+                f"📺 Season {int(SEASONS[i+1][1:])}", callback_data=f"fs#{SEASONS[i+1].lower()}#{key}")
         ])
 
     btn.insert(
         0,
-        [InlineKeyboardButton("⇊ ꜱᴇʟᴇᴄᴛ ꜱᴇᴀꜱᴏɴ ⇊", callback_data="ident")],
+        [InlineKeyboardButton("📺 Select Season", callback_data="ident")],
     )
-    btn.append([InlineKeyboardButton(text="↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ​↭",
+    btn.append([InlineKeyboardButton(text="↩ Back to Files",
                callback_data=f"next_{req}_{key}_{offset}")])
     btn = _pro_add_back_to_titles(btn, key)
     await query.edit_message_reply_markup(InlineKeyboardMarkup(btn))
@@ -1409,17 +1473,17 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
     btn.insert(
         0,
         [
-            InlineKeyboardButton("Qᴜᴀʟɪᴛʏ", callback_data=f"qualities#{key}"),
-            InlineKeyboardButton("✦ Language", callback_data=f"languages#{key}"),
-            InlineKeyboardButton("Sᴇᴀꜱᴏɴ", callback_data=f"seasons#{key}"),
+            InlineKeyboardButton("🎚 Quality", callback_data=f"qualities#{key}"),
+            InlineKeyboardButton("🌐 Language", callback_data=f"languages#{key}"),
+            InlineKeyboardButton("📺 Season", callback_data=f"seasons#{key}"),
         ],
     )
     btn.insert(
         0,
         [
             InlineKeyboardButton(
-                "✦ Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
-            InlineKeyboardButton("✦ Send All", callback_data=f"sendfiles#{key}"),
+                "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+            InlineKeyboardButton("📦 Send All", callback_data=f"sendfiles#{key}"),
         ],
     )
     if n_offset != "":
@@ -1445,7 +1509,7 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
         n_offset = 0
         btn.append(
             [InlineKeyboardButton(
-                "↭  ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", callback_data="pages")]
+                "✓ No more pages", callback_data="pages")]
         )
     if not settings.get("button"):
         curr_time = datetime.now(pytz.timezone("Asia/Kolkata")).time()
@@ -1615,6 +1679,9 @@ async def cb_handler(client: Client, query: CallbackQuery):
 
     elif query.data == "pages":
         await query.answer("ᴛʜɪs ɪs ᴘᴀɢᴇs ʙᴜᴛᴛᴏɴ 😅")
+
+    elif query.data == "ident":
+        await query.answer()
 
     elif query.data == "hiding":
         await query.answer("ʙᴇᴄᴀᴜsᴇ ᴏғ ʟᴀɢᴛᴇ ғɪʟᴇs ɪɴ ᴅᴀᴛᴀʙᴀsᴇ,🙏\nɪᴛ ᴛᴀᴋᴇꜱ ʟɪᴛᴛʟᴇ ʙɪᴛ ᴛɪᴍᴇ",show_alert=True)
@@ -2244,8 +2311,8 @@ async def cb_handler(client: Client, query: CallbackQuery):
         return await ui_help(client, query)
 
     elif query.data == "about":
-        from plugins.ui_pro import ui_account
-        return await ui_account(client, query)
+        from plugins.ui_pro import ui_about
+        return await ui_about(client, query)
 
     elif query.data == "give_trial":
         try:
@@ -2309,20 +2376,12 @@ async def cb_handler(client: Client, query: CallbackQuery):
 
     elif query.data == "premium_info":
         try:
-            btn = [[
-                InlineKeyboardButton('• ʙᴜʏ ᴘʀᴇᴍɪᴜᴍ •', callback_data='buy_info'),
-            ],[
-                InlineKeyboardButton('• ʀᴇꜰᴇʀ ꜰʀɪᴇɴᴅꜱ', callback_data='reffff'),
-                InlineKeyboardButton('ꜰʀᴇᴇ ᴛʀɪᴀʟ •', callback_data='give_trial')
-            ],[
-                InlineKeyboardButton('Home', callback_data='start')
-            ]]
-            reply_markup = InlineKeyboardMarkup(btn)
+            from plugins.ui_pro import premium_overview_text, premium_overview_kb
             await client.edit_message_media(
                 chat_id=query.message.chat.id,
                 message_id=query.message.id,
-                media=InputMediaPhoto(media=SUBSCRIPTION, caption=script.BPREMIUM_TXT, parse_mode=enums.ParseMode.HTML),
-                reply_markup=reply_markup
+                media=InputMediaPhoto(media=SUBSCRIPTION, caption=premium_overview_text(), parse_mode=enums.ParseMode.HTML),
+                reply_markup=premium_overview_kb()
             )
         except Exception as e:
             logging.exception("Exception in 'premium_info' callback")
@@ -2331,10 +2390,11 @@ async def cb_handler(client: Client, query: CallbackQuery):
     elif query.data == "buy_info":
         try:
             btn = [[
-                InlineKeyboardButton('ꜱᴛᴀʀ', callback_data='star_info'),
-                InlineKeyboardButton('ᴜᴘɪ', callback_data='upi_info')
+                InlineKeyboardButton('⭐ Telegram Stars', callback_data='star_info'),
+                InlineKeyboardButton('💳 UPI', callback_data='upi_info')
             ],[
-                InlineKeyboardButton('⇋ ʙᴀᴄᴋ ᴛᴏ ᴘʀᴇᴍɪᴜᴍ ⇋', callback_data='premium_info')
+                InlineKeyboardButton('⬅️ Back', callback_data='premium_info'),
+                InlineKeyboardButton('🏠 Home', callback_data='ui_home')
             ]]
             reply_markup = InlineKeyboardMarkup(btn)
             await client.edit_message_media(
@@ -2349,9 +2409,10 @@ async def cb_handler(client: Client, query: CallbackQuery):
     elif query.data == "upi_info":
         try:
             btn = [[
-                InlineKeyboardButton('• ꜱᴇɴᴅ  ᴘᴀʏᴍᴇɴᴛ ꜱᴄʀᴇᴇɴꜱʜᴏᴛ •', url=OWNER_LNK),
+                InlineKeyboardButton('📲 Send Payment Screenshot', url=OWNER_LNK),
             ],[
-                InlineKeyboardButton('⇋ ʙᴀᴄᴋ ⇋', callback_data='buy_info')
+                InlineKeyboardButton('⬅️ Back', callback_data='buy_info'),
+                InlineKeyboardButton('🏠 Home', callback_data='ui_home')
             ]]
             reply_markup = InlineKeyboardMarkup(btn)
             await client.edit_message_media(
@@ -2365,12 +2426,16 @@ async def cb_handler(client: Client, query: CallbackQuery):
 
     elif query.data == "star_info":
         try:
+            from plugins.ui_pro import plan_label
             btn = [
-                InlineKeyboardButton(f"{stars}⭐", callback_data=f"buy_{stars}")
+                InlineKeyboardButton(f"{stars}⭐ • {plan_label(days)}", callback_data=f"buy_{stars}")
                 for stars, days in STAR_PREMIUM_PLANS.items()
             ]
             buttons = [btn[i:i + 2] for i in range(0, len(btn), 2)]
-            buttons.append([InlineKeyboardButton("‹ Back", callback_data="buy_info")])
+            buttons.append([
+                InlineKeyboardButton("⬅️ Back", callback_data="buy_info"),
+                InlineKeyboardButton("🏠 Home", callback_data="ui_home"),
+            ])
             reply_markup = InlineKeyboardMarkup(buttons)
             await client.edit_message_media(
                 chat_id=query.message.chat.id,
@@ -2565,19 +2630,19 @@ async def auto_filter(client, msg, spoll=False):
             btn.insert(0,
                        [
                            InlineKeyboardButton(
-                               "✦ Quality", callback_data=f"qualities#{key}"),
+                               "🎚 Quality", callback_data=f"qualities#{key}"),
                            InlineKeyboardButton(
-                               "✦ Language", callback_data=f"languages#{key}"),
+                               "🌐 Language", callback_data=f"languages#{key}"),
                            InlineKeyboardButton(
-                               "✦ Season",  callback_data=f"seasons#{key}")
+                               "📺 Season",  callback_data=f"seasons#{key}")
                        ]
                        )
             btn.insert(0,
                        [
                            InlineKeyboardButton(
-                               "✦ Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+                               "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
                            InlineKeyboardButton(
-                               "✦ Send All", callback_data=f"sendfiles#{key}")
+                               "📦 Send All", callback_data=f"sendfiles#{key}")
 
                        ])
         else:
@@ -2585,19 +2650,19 @@ async def auto_filter(client, msg, spoll=False):
             btn.insert(0,
                        [
                            InlineKeyboardButton(
-                               "✦ Quality", callback_data=f"qualities#{key}"),
+                               "🎚 Quality", callback_data=f"qualities#{key}"),
                            InlineKeyboardButton(
-                               "✦ Language", callback_data=f"languages#{key}"),
+                               "🌐 Language", callback_data=f"languages#{key}"),
                            InlineKeyboardButton(
-                               "✦ Season",  callback_data=f"seasons#{key}")
+                               "📺 Season",  callback_data=f"seasons#{key}")
                        ]
                        )
             btn.insert(0,
                        [
                            InlineKeyboardButton(
-                               "✦ Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
+                               "💎 Premium", url=f"https://t.me/{temp.U_NAME}?start=premium"),
                            InlineKeyboardButton(
-                               "✦ Send All", callback_data=f"sendfiles#{key}")
+                               "📦 Send All", callback_data=f"sendfiles#{key}")
                        ])
 
         if offset != "":
@@ -2627,7 +2692,7 @@ async def auto_filter(client, msg, spoll=False):
                     )
         else:
             btn.append([InlineKeyboardButton(
-                text="↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", callback_data="pages")])
+                text="✓ No more pages", callback_data="pages")])
 
         if settings.get('imdb'):
             imdb = await get_posterx(search, file=(files[0]).file_name) if TMDB_POSTER else await get_poster(search, file=(files[0]).file_name)

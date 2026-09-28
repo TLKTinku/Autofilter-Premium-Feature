@@ -31,42 +31,15 @@ async def remove_premium(client, message):
 @Client.on_message(filters.command("myplan"))
 async def myplan(client, message):
     try:
+        from plugins.ui_pro import get_plan_info, account_text
         user = message.from_user.mention
         user_id = message.from_user.id
-        data = await db.get_user(user_id)
-        if data and data.get("expiry_time"):
-            expiry = data["expiry_time"].astimezone(pytz.timezone("Asia/Kolkata"))
-            now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
-            remaining = expiry - now
-            if remaining.total_seconds() > 0:
-                total_seconds = int(remaining.total_seconds())
-                days, rem = divmod(total_seconds, 86400)
-                hours, rem = divmod(rem, 3600)
-                minutes = rem // 60
-                status = "● ACTIVE"
-                left = f"{days}d  {hours}h  {minutes}m"
-            else:
-                status = "● EXPIRED"
-                left = "Expired"
-            expiry_text = expiry.strftime("%d %b %Y  •  %I:%M %p")
-        else:
-            status = "● FREE"
-            left = "No active premium plan"
-            expiry_text = "—"
-
-        caption = (
-            "╭────────────────────────╮\n"
-            "│      👤 <b>MY PLAN</b>        │\n"
-            "╰────────────────────────╯\n\n"
-            f"👤 {user}\n"
-            f"🆔 <code>{user_id}</code>\n\n"
-            f"💎 <b>Status</b>\n{status}\n\n"
-            f"⏳ <b>Time Left</b>\n{left}\n\n"
-            f"📅 <b>Expiry</b>\n{expiry_text}\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━"
-        )
+        info = await get_plan_info(user_id)
+        caption = account_text(user, user_id, info)
+        label = "💎 Extend Plan" if info["plan"] == "Premium" else "💎 Upgrade Plan"
         markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💎  Extend Plan", callback_data="premium_info")],
+            [InlineKeyboardButton(label, callback_data="premium_info")],
+            [InlineKeyboardButton("🏠 Home", callback_data="ui_home")],
         ])
         await message.reply_photo(photo=SUBSCRIPTION, caption=caption, reply_markup=markup, parse_mode="html")
     except Exception as e:
