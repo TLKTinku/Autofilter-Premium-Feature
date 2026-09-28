@@ -178,7 +178,7 @@ REQST_CHANNEL = int(reqst_channel) if reqst_channel and id_pattern.search(reqst_
 SUPPORT_CHAT_ID = int(support_chat_id) if support_chat_id and id_pattern.search(support_chat_id) else None
 owner_chat_group = environ.get('OWNER_CHAT_GROUP_ID', '')  # Owner's personal chat group id, where 'Request Owner' button messages are sent (make sure bot is added there)
 OWNER_CHAT_GROUP = int(owner_chat_group) if owner_chat_group and id_pattern.search(owner_chat_group) else REQST_CHANNEL
-LANGUAGES = {"ᴍᴀʟᴀʏᴀʟᴀᴍ":"mal","ᴛᴀᴍɪʟ":"tam","ᴇɴɢʟɪsʜ":"eng","ʜɪɴᴅɪ":"hin","ᴛᴇʟᴜɢᴜ":"tel","ᴋᴀɴɴᴀᴅᴀ":"kan","ɢᴜᴊᴀʀᴀᴛɪ":"guj","ᴍᴀʀᴀᴛʜɪ":"mar","ᴘᴜɴᴊᴀʙɪ":"pun"}
+LANGUAGES = {"Malayalam":"mal","Tamil":"tam","English":"eng","Hindi":"hin","Telugu":"tel","Kannada":"kan","Gujarati":"guj","Marathi":"mar","Punjabi":"pun"}
 QUALITIES = ["360P", "480P", "720P", "1080P", "1440P", "2160P", "4K"]
 
 SEASON_COUNT = 12

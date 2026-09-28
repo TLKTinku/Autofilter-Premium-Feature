@@ -1,19 +1,16 @@
 class script(object):
-    START_TXT = """╭━━━━━━━━━━━━━━━━━━━━╮
-       🎬 <b>𝐌𝐘 𝐌𝐎𝐕𝐈𝐄𝐒</b>
-   ᴍᴏᴠɪᴇs • sᴇʀɪᴇs • ᴀɴɪᴍᴇ • ᴋᴅʀᴀᴍᴀ
-╰━━━━━━━━━━━━━━━━━━━━╯
+    START_TXT = """╭━━━━━━━━━━━━━━━━━━━━━━╮
+        <b>🎬 MY MOVIES</b>
+╰━━━━━━━━━━━━━━━━━━━━━━╯
+          YOUR MOVIE LIBRARY
 
-👋 Hey, {0}!
+👋 Welcome, {0}
 
-🍿 Find your favourite movies,
-series and more in seconds.
+🔎 Search movies & series
+📨 Request titles you can't find
+💎 Unlock Premium features
 
-━━━━━━━━━━━━━━━━━━━━━━
-        ✦ <b>𝐌𝐄𝐍𝐔</b> ✦
-━━━━━━━━━━━━━━━━━━━━━━
-
-⚡ Fast • Simple • Organized"""
+━━━━━━━━━━━━━━━━━━━━━━"""
 
     GSTART_TXT = """<b>🚩 ᴊᴀɪ ꜱʜʀɪ ʀᴀᴍ 🚩</b>
 
@@ -302,39 +299,47 @@ Mᴇꜱꜱᴀɢᴇ : <b>{}</b>"""
 
     
 
-    PREMIUM_TEXT = """<blockquote>🎖️ <b>ᴀᴠᴀɪʟᴀʙʟᴇ ᴘʟᴀɴs</b></blockquote>
+    PREMIUM_TEXT = """╭━━━━━━━━━━━━━━━━━━━━━━╮
+        <b>💎 CHOOSE PLAN</b>
+╰━━━━━━━━━━━━━━━━━━━━━━╯
 
+💎 <b>7 DAYS</b>  •  ₹20
+💎 <b>15 DAYS</b>  •  ₹40
+💎 <b>30 DAYS</b>  •  ₹65
+💎 <b>45 DAYS</b>  •  ₹90
+💎 <b>60 DAYS</b>  •  ₹110
 
-◉ 07 ᴅᴀʏꜱ - 20 ₹  / 10 ꜱᴛᴀʀ
-◉ 15 ᴅᴀʏꜱ - 40 ₹  / 40 ꜱᴛᴀʀ
-◉ 30 ᴅᴀʏꜱ - 65 ₹  / 65 ꜱᴛᴀʀ
-◉ 45 ᴅᴀʏꜱ - 90 ₹  / 90 ꜱᴛᴀʀ
-◉ 60 ᴅᴀʏꜱ - 110 ₹  / 110 ꜱᴛᴀʀ
+━━━━━━━━━━━━━━━━━━━━━━
 
-•─────•─────────•─────•
-🏷️ <a href='https://t.me/iP_Update'>ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ ᴘʀᴏᴏꜰ</a>
+⭐ Pay with Telegram Stars
+💳 Pay with UPI
 
-‼️ ᴍᴜꜱᴛ ꜱᴇɴᴅ ꜱᴄʀᴇᴇɴꜱʜᴏᴛ ᴀꜰᴛᴇʀ ᴘᴀʏᴍᴇɴᴛ.
-‼️ ᴀꜰᴛᴇʀ ꜱᴇɴᴅɪɴɢ ꜱᴄʀᴇᴇɴꜱʜᴏᴛ ɢɪᴠᴇ ᴜꜱ ꜱᴏᴍᴇᴛɪᴍᴇꜱ ᴛᴏ ᴀᴅᴅ ʏᴏᴜ ɪɴ ᴘʀᴇᴍɪᴜᴍ ʟɪꜱᴛ."""
+‼️ After UPI payment, send the screenshot to the owner.
+Your plan is activated after verification.
 
-    PREMIUM_STAR_TEXT = """<b><blockquote>ᴘᴀʏᴍᴇɴᴛ ᴍᴇᴛʜᴏᴅ: ᴛᴇʟᴇɢʀᴀᴍ ꜱᴛᴀʀꜱ ⭐</blockquote>
+🏷️ <a href='https://t.me/iP_Update'>Subscription proof</a>"""
 
-ɴᴏᴡ ʏᴏᴜ ᴄᴀɴ ʙᴜʏ ᴏᴜʀ ᴘʀᴇᴍɪᴜᴍ ꜱᴇʀᴠɪᴄᴇ ᴜꜱɪɴɢ ᴛᴇʟᴇɢʀᴀᴍ ꜱᴛᴀʀꜱ.  
+    PREMIUM_STAR_TEXT = """╭━━━━━━━━━━━━━━━━━━━━━━╮
+        <b>⭐ TELEGRAM STARS</b>
+╰━━━━━━━━━━━━━━━━━━━━━━╯
 
-ɪꜰ ʏᴏᴜ ꜰᴀᴄᴇ ᴀɴʏ ᴘʀᴏʙʟᴇᴍ, ꜱᴇɴᴅ ᴀ ꜱᴄʀᴇᴇɴꜱʜᴏᴛ ᴛᴏ ᴛʜᴇ ᴏᴡɴᴇʀ.
+Buy Premium using Telegram Stars.
+Select your plan below 👇
 
-ꜱᴇʟᴇᴄᴛ ʏᴏᴜʀ ᴅᴇꜱɪʀᴇᴅ ᴀᴍᴏᴜɴᴛ ᴀɴᴅ ᴘᴜʀᴄʜᴀꜱᴇ ᴀ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ 👇.</b>
-"""
+━━━━━━━━━━━━━━━━━━━━━━
+If you face any problem, send a screenshot to the owner."""
 
-    PREMIUM_UPI_TEXT = """<b><blockquote>ᴘᴀʏᴍᴇɴᴛ ᴍᴇᴛʜᴏᴅ: ᴜᴘɪ</blockquote>
+    PREMIUM_UPI_TEXT = """╭━━━━━━━━━━━━━━━━━━━━━━╮
+        <b>💳 UPI PAYMENT</b>
+╰━━━━━━━━━━━━━━━━━━━━━━╯
 
-ʏᴏᴜ ᴄᴀɴ ᴘᴜʀᴄʜᴀꜱᴇ ᴘʀᴇᴍɪᴜᴍ ᴛʜʀᴏᴜɢʜ ᴜᴘɪ , ɴᴇᴛ ʙᴀɴᴋɪɴɢ.
+Pay using UPI or net banking.
 
-💳 ᴜᴘɪ ɪᴅ - <code>{}</code>
+💳 UPI ID: <code>{}</code>
 
-💢 ᴍᴜꜱᴛ ꜱᴇɴᴅ ꜱᴄʀᴇᴇɴꜱʜᴏᴛ ᴀꜰᴛᴇʀ ᴘᴀʏᴍᴇɴᴛ.
-
-‼️ ᴀꜰᴛᴇʀ ꜱᴇɴᴅɪɴɢ ꜱᴄʀᴇᴇɴꜱʜᴏᴛ ᴘʟᴇᴀꜱᴇ ɢɪᴠᴇ ᴜꜱ ꜱᴏᴍᴇᴛɪᴍᴇ ᴛᴏ ᴀᴅᴅ ʏᴏᴜ ɪɴ ᴘʀᴇᴍɪᴜᴍ ʟɪꜱᴛ.</b>"""
+━━━━━━━━━━━━━━━━━━━━━━
+‼️ Send the payment screenshot to the owner.
+Your plan is added after verification."""
 
 
     PREMIUM_END_TEXT = """<b>ʜᴇʏ {},</b>
@@ -369,29 +374,26 @@ Mᴇꜱꜱᴀɢᴇ : <b>{}</b>"""
 ‼️ ᴀꜰᴛᴇʀ ꜱᴇɴᴅɪɴɢ ꜱᴄʀᴇᴇɴꜱʜᴏᴛ ɢɪᴠᴇ ᴜꜱ ꜱᴏᴍᴇᴛɪᴍᴇꜱ ᴛᴏ ᴀᴅᴅ ʏᴏᴜ ɪɴ ᴘʀᴇᴍɪᴜᴍ ʟɪꜱᴛ."""  
 
 
-    PREPLANS_TXT = PREMIUM_TXT = """<b>👋 ʜᴇʏ {},
+    PREPLANS_TXT = PREMIUM_TXT = """╭━━━━━━━━━━━━━━━━━━━━━━╮
+        <b>💎 PREMIUM</b>
+╰━━━━━━━━━━━━━━━━━━━━━━╯
 
-<blockquote>🎖️ <b>ᴀᴠᴀɪʟᴀʙʟᴇ ᴘʟᴀɴꜱ</b></blockquote>
+👋 Hey, {}
 
-◉ 07 ᴅᴀʏꜱ - 20 ₹  
-◉ 15 ᴅᴀʏꜱ - 40 ₹  
-◉ 30 ᴅᴀʏꜱ - 65 ₹  
-◉ 45 ᴅᴀʏꜱ - 90 ₹  
-◉ 60 ᴅᴀʏꜱ - 110 ₹  
+💎 <b>7 DAYS</b>  •  ₹20
+💎 <b>15 DAYS</b>  •  ₹40
+💎 <b>30 DAYS</b>  •  ₹65
+💎 <b>45 DAYS</b>  •  ₹90
+💎 <b>60 DAYS</b>  •  ₹110
 
-•─────•─────────•─────•
+━━━━━━━━━━━━━━━━━━━━━━
 
-🏷️ <b>ᴘᴀʏᴍᴇɴᴛ ᴍᴇᴛʜᴏᴅꜱ</b>
+💸 UPI ID → <code>{}</code>
+📷 QR Code → <a href='{}'>Scan here</a>
 
-💸 ᴜᴘɪ ɪᴅ → <code>{}</code>  
-📷 ǫʀ ᴄᴏᴅᴇ → <a href='{}'>ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ꜱᴄᴀɴ</a>  
-
-🧾 ᴘᴀʏ ᴀᴄᴄᴏʀᴅɪɴɢ ᴛᴏ ʏᴏᴜʀ ᴘʟᴀɴ ᴀɴᴅ ᴇɴᴊᴏʏ ᴘʀᴇᴍɪᴜᴍ!
-
-‼️ ᴍᴜꜱᴛ ꜱᴇɴᴅ ꜱᴄʀᴇᴇɴꜱʜᴏᴛ ᴀꜰᴛᴇʀ ᴘᴀʏᴍᴇɴᴛ.  
-‼️ ᴀꜰᴛᴇʀ ꜱᴇɴᴅɪɴɢ ᴀ ꜱᴄʀᴇᴇɴꜱʜᴏᴛ, ɢɪᴠᴇ ᴜꜱ ꜱᴏᴍᴇ ᴛɪᴍᴇ ᴛᴏ ᴀᴅᴅ ʏᴏᴜ ɪɴ ᴛʜᴇ ᴘʀᴇᴍɪᴜᴍ ʟɪꜱᴛ.
-
-💎 ᴄʜᴇᴄᴋ ʏᴏᴜʀ ᴘʟᴀɴ → /myplan</b>"""
+━━━━━━━━━━━━━━━━━━━━━━
+‼️ Send the payment screenshot after paying.
+💎 Check your plan → /myplan"""
 
 
     FREE_TXT = """<b>👋 ʜᴇʏ {},
