@@ -141,17 +141,20 @@ def _pro_file_btn(file):
 
 def _file_btn_rows(file):
     """
-    Two rows per file (Telegram buttons are single-line only):
-      🎬 The Boys
-      📥 S01E07 • 720P • Hin/Eng • 762.9 MB
-    Both rows open the same file.
+    Single full-width button (biggest Telegram allows, 1 row only):
+      [🎬 The Boys · S01E07 · 720P · Hin · 762MB]
+    Name shortened so quality/size always fit (64-char limit).
     """
     title, meta = _pro_file_parts(file)
     cb = f"file#{file.file_id}"
-    return [
-        [InlineKeyboardButton(f"🎬 {title}"[:64], callback_data=cb)],
-        [InlineKeyboardButton(f"📥 {meta}"[:64], callback_data=cb)],
-    ]
+    prefix = "🎬 "
+    room = 64 - len(prefix) - len(meta) - 3  # " · "
+    if room < 6:
+        label = f"{prefix}{meta}"[:64]
+    else:
+        short = title if len(title) <= room else (title[: room - 1].rstrip() + "…")
+        label = f"{prefix}{short} · {meta}"[:64]
+    return [[InlineKeyboardButton(label, callback_data=cb)]]
 
 logger.setLevel(logging.ERROR)
 
