@@ -56,8 +56,10 @@ def _pro_bullets(value):
     return re.sub(r"\s*,\s*", " • ", str(value).strip())
 
 
-def _pro_file_parts(file):
-    """Return (title, meta) for a file. Used for 2-row buttons."""
+def _pro_file_parts(file, max_title=22):
+    """Return (title, meta, episode, quality, language, size).
+    max_title: button=22 (Telegram limit), text mode=48 (readable full short name).
+    """
     name = clean_filename(getattr(file, "file_name", None) or "File")
     raw = name.lower().replace("_", " ").replace(".", " ")
     size = get_size(getattr(file, "file_size", 0) or 0)
@@ -96,15 +98,25 @@ def _pro_file_parts(file):
 
     langs = []
     language_map = (
-        ("hindi", "Hin"), ("english", "Eng"), ("tamil", "Tam"),
-        ("telugu", "Tel"), ("malayalam", "Mal"), ("kannada", "Kan"),
-        ("punjabi", "Pun"), ("gujarati", "Guj"), ("marathi", "Mar"),
-        ("bengali", "Ben"), ("multi audio", "Multi"), ("dual audio", "Dual"),
+        ("hindi", "Hindi"), ("english", "English"), ("tamil", "Tamil"),
+        ("telugu", "Telugu"), ("malayalam", "Malayalam"), ("kannada", "Kannada"),
+        ("punjabi", "Punjabi"), ("gujarati", "Gujarati"), ("marathi", "Marathi"),
+        ("bengali", "Bengali"),
     )
     for token, label in language_map:
         if token in raw and label not in langs:
             langs.append(label)
-    language = "/".join(langs[:2])
+    # 3+ → Multi | 2 → both | 1 → one | 0 → empty
+    if re.search(r"\bmulti[\s._-]?audio\b|\bmulti\b", raw) or len(langs) >= 3:
+        language = "Multi"
+    elif re.search(r"\bdual[\s._-]?audio\b|\bdual\b", raw):
+        language = "/".join(langs[:2]) if len(langs) >= 2 else "Dual"
+    elif len(langs) >= 2:
+        language = "/".join(langs[:2])
+    elif len(langs) == 1:
+        language = langs[0]
+    else:
+        language = ""
 
     title = re.sub(r"\.[A-Za-z0-9]{1,8}$", "", name)
     title = re.sub(r"[._]+", " ", title)
@@ -125,78 +137,56 @@ def _pro_file_parts(file):
         title = re.sub(r"\bS\d{1,2}E\d{1,3}\b", " ", title, flags=re.I)
         title = re.sub(r"\s+", " ", title).strip(" -._")
     title = title.title() if title else "File"
-    # Keep title short so SxxExx + quality stay visible at the front
-    if len(title) > 22:
-        title = title[:21].rstrip() + "…"
 
-    # Priority order: Episode → Quality → Lang → Size  (name added separately in button)
+    # Buttons only: trim at word boundary, NO ellipsis dots
+    if max_title and len(title) > max_title:
+        cut = title[:max_title].rsplit(" ", 1)[0].rstrip(" -.,")
+        title = cut if len(cut) >= 8 else title[:max_title].rstrip()
+
     meta = " · ".join(x for x in (episode, quality, language, size) if x) or size
-    return title, meta, episode, quality
+    return title, meta, episode, quality, language, size
 
 
 def _pro_file_btn(file):
     """Single-line fallback."""
-    title, meta, episode, quality = _pro_file_parts(file)
+    title, meta, episode, quality, language, size = _pro_file_parts(file, max_title=18)
     head = " · ".join(x for x in (episode, quality) if x)
     if head:
-        label = f"📥 {head} · {title} · {meta.split(' · ')[-1] if meta else ''}".strip(" ·")
+        label = f"📥 {head} · {title} · {size}".strip(" ·")
     else:
-        label = f"📥 {title} · {meta}"
+        label = f"📥 {title} · {size}"
     return label[:64]
 
 
 def _file_btn_rows(file):
     """
-    Single full-width button — SxxExx + quality FIRST so they never get cut:
-      [📥 S01E07 · 720P · Hin · The Boys · 762MB]
-    Name is shortened; episode/quality always kept.
+    Single full-width button — SxxExx + quality FIRST:
+      [📥 S01E07 · 720P · The Boys · 762MB]
     """
-    title, meta, episode, quality = _pro_file_parts(file)
+    title, meta, episode, quality, language, size = _pro_file_parts(file, max_title=18)
     cb = f"file#{file.file_id}"
-    # Build head (must keep) then soft parts
     head_parts = [x for x in (episode, quality) if x]
     head = " · ".join(head_parts)
-    # remaining: lang + size already in meta after episode/quality
-    # meta = episode · quality · lang · size
-    rest_parts = []
-    if meta:
-        for p in meta.split(" · "):
-            if p and p not in head_parts and p != title:
-                rest_parts.append(p)
-    # Order: HEAD · title · rest  (head never truncated)
     prefix = "📥 "
-    if head:
-        fixed = f"{prefix}{head} · "
-    else:
-        fixed = prefix
+    fixed = f"{prefix}{head} · " if head else prefix
     room = 64 - len(fixed)
-    # Prefer title then lang/size
-    tail_bits = [title] + rest_parts
-    tail = " · ".join(tail_bits)
-    if len(tail) > room:
-        # keep size (last rest part) if possible
-        size_part = rest_parts[-1] if rest_parts else ""
-        lang_parts = rest_parts[:-1] if len(rest_parts) > 1 else []
-        budget = room - (len(size_part) + 3 if size_part else 0)
-        name_budget = max(budget - (len(" · ".join(lang_parts)) + 3 if lang_parts else 0), 6)
-        short_title = title if len(title) <= name_budget else (title[: name_budget - 1].rstrip() + "…")
-        pieces = [short_title] + lang_parts
-        if size_part:
-            pieces.append(size_part)
-        tail = " · ".join(pieces)[:room]
+    # title + size (lang optional if room)
+    size_part = size or ""
+    budget = room - (len(size_part) + 3 if size_part else 0)
+    short_title = title if len(title) <= budget else (title[: max(budget - 1, 6)].rsplit(" ", 1)[0] or title[:budget - 1]) + "…"
+    tail = f"{short_title} · {size_part}" if size_part else short_title
     label = (fixed + tail)[:64]
     return [[InlineKeyboardButton(label, callback_data=cb)]]
 
 
 def _text_file_line(file, idx, chat_id):
-    """Pretty text-mode row: SxxExx · quality first, then short name + size."""
-    title, meta, episode, quality = _pro_file_parts(file)
-    head = " · ".join(x for x in (episode, quality) if x)
-    size = get_size(getattr(file, "file_size", 0) or 0)
-    if head:
-        shown = f"{head} · {title} · {size}"
-    else:
-        shown = f"{title} · {meta}" if meta else title
+    """
+    Text-mode — FULL cleaned name, NO "…" cut:
+      1. 1080P · Harry Potter 20th Anniversary Return To Hogwarts · 2.56 GB
+    """
+    title, meta, episode, quality, language, size = _pro_file_parts(file, max_title=None)
+    parts = [x for x in (episode, quality, title, language, size) if x]
+    shown = " · ".join(parts)
     link = f"https://telegram.me/{temp.U_NAME}?start=file_{chat_id}_{file.file_id}"
     return f"<b>{idx}. <a href='{link}'>{shown}</a></b>\n"
 
@@ -219,16 +209,38 @@ def _attach_request_btn(btn, key, search, user):
     return btn
 
 
-def _result_header(search, total_results, remaining_seconds, user, chat_title=None):
-    """Clean result caption header."""
+def _result_header(search, total_results, remaining_seconds, user, chat_title=None, with_imdb_meta=False, rating=None, genres=None, languages=None, year=None, url=None):
+    """
+    Style C box — used in BOTH text mode and button mode.
+    If IMDB/poster not found → no rating/genre/audio lines.
+    Always shows total file count.
+    """
     name = user.mention if user else "User"
+    title = (search or "").strip().title()
     total = total_results if total_results not in (None, "") else "—"
-    return (
-        f"<b>🏷 ᴛɪᴛʟᴇ :</b> <code>{search}</code>\n"
-        f"<b>📁 ꜰɪʟᴇs :</b> <code>{total}</code>\n"
-        f"<b>⏱ ᴛɪᴍᴇ :</b> <code>{remaining_seconds}s</code>\n"
-        f"<b>👤 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ :</b> {name}\n"
-    )
+
+    lines = ["╭──────────────────────────────╮"]
+    if url and title:
+        lines.append(f"│ 🎬 <a href=\"{url}\">{title}</a>")
+    else:
+        lines.append(f"│ 🎬 {title}")
+    if year:
+        lines.append(f"│ ({year})")
+    lines.append("├──────────────────────────────┤")
+    if with_imdb_meta:
+        if rating:
+            lines.append(f"│ ★ ʀᴀᴛɪɴɢ  ›  {rating}")
+        if genres:
+            lines.append(f"│ 🎭 ɢᴇɴʀᴇ  ›  {genres}")
+        if languages:
+            lines.append(f"│ 🎧 ᴀᴜᴅɪᴏ  ›  {languages}")
+    lines.append(f"│ 📁 ꜰɪʟᴇꜱ  ›  {total}")
+    lines.append(f"│ ⚡ ᴛɪᴍᴇ   ›  {remaining_seconds} sᴇᴄ")
+    lines.append(f"│ 👤 ʀᴇǫ    ›  {name}")
+    lines.append("╰──────────────────────────────╯")
+    lines.append("")
+    lines.append("📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ")
+    return "<b>" + "\n".join(lines) + "</b>\n"
 
 
 logger.setLevel(logging.ERROR)
@@ -1140,7 +1152,9 @@ async def qualities_cb_handler(client: Client, query: CallbackQuery):
         pass
 
     _, key = query.data.split("#")
-    search = FRESH.get(key)
+    search = FRESH.get(key) or BUTTONS.get(key)
+    if not search:
+        return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
     search = search.replace(' ', '_')
 
     btn = []
@@ -1170,20 +1184,19 @@ async def qualities_cb_handler(client: Client, query: CallbackQuery):
 async def filter_qualities_cb_handler(client: Client, query: CallbackQuery):
     _, qual, key = query.data.split("#")
     curr_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
-    search = FRESH.get(key)
-    search = search.replace("_", " ")
-    baal = qual in search
-    if baal:
-        search = search.replace(qual, "")
-    else:
-        search = search
+    search = (FRESH.get(key) or BUTTONS.get(key) or "").replace("_", " ").strip()
+    if not search:
+        return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
+    # strip any previous quality token then apply new one
+    search = re.sub(r'\b(?:360p|480p|720p|1080p|1440p|2160p|4k)\b', ' ', search, flags=re.I)
+    search = re.sub(r'\s+', ' ', search).strip()
     req = query.from_user.id
     chat_id = query.message.chat.id
     message = query.message
     try:
-        if int(query.from_user.id) not in [query.message.reply_to_message.from_user.id, 0]:
+        if query.message.reply_to_message and int(query.from_user.id) not in [query.message.reply_to_message.from_user.id, 0]:
             return await query.answer(f"⚠️ ʜᴇʟʟᴏ {query.from_user.first_name},\nᴛʜɪꜱ ɪꜱ ɴᴏᴛ ʏᴏᴜʀ ᴍᴏᴠɪᴇ ʀᴇǫᴜᴇꜱᴛ,\nʀᴇǫᴜᴇꜱᴛ ʏᴏᴜʀ'ꜱ...", show_alert=True,)
-    except:
+    except Exception:
         pass
     if qual != "homepage":
         search = f"{search} {qual}"
@@ -1299,7 +1312,9 @@ async def languages_cb_handler(client: Client, query: CallbackQuery):
         pass
 
     _, key = query.data.split("#")
-    search = FRESH.get(key)
+    search = FRESH.get(key) or BUTTONS.get(key)
+    if not search:
+        return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
     search = search.replace(' ', '_')
 
     items = list(LANGUAGES.items())
@@ -1328,20 +1343,22 @@ async def languages_cb_handler(client: Client, query: CallbackQuery):
 async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
     _, lang, key = query.data.split("#")
     curr_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
-    search = FRESH.get(key)
-    search = search.replace("_", " ")
-    baal = lang in search
-    if baal:
-        search = search.replace(lang, "")
-    else:
-        search = search
+    search = (FRESH.get(key) or BUTTONS.get(key) or "").replace("_", " ").strip()
+    if not search:
+        return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
+    # strip previous language / dual / multi tokens
+    search = re.sub(
+        r'\b(?:hindi|english|tamil|telugu|malayalam|kannada|gujarati|marathi|punjabi|bengali|dual|multi)\b',
+        ' ', search, flags=re.I,
+    )
+    search = re.sub(r'\s+', ' ', search).strip()
     req = query.from_user.id
     chat_id = query.message.chat.id
     message = query.message
     try:
-        if int(query.from_user.id) not in [query.message.reply_to_message.from_user.id, 0]:
+        if query.message.reply_to_message and int(query.from_user.id) not in [query.message.reply_to_message.from_user.id, 0]:
             return await query.answer(f"⚠️ ʜᴇʟʟᴏ {query.from_user.first_name},\nᴛʜɪꜱ ɪꜱ ɴᴏᴛ ʏᴏᴜʀ ᴍᴏᴠɪᴇ ʀᴇǫᴜᴇꜱᴛ,\nʀᴇǫᴜᴇꜱᴛ ʏᴏᴜʀ'ꜱ...", show_alert=True,)
-    except:
+    except Exception:
         pass
     if lang != "homepage":
         search = f"{search} {lang}"
@@ -2788,50 +2805,63 @@ async def auto_filter(client, msg, spoll=False):
                 f"{f.file_name} {getattr(f, 'caption', '') or ''}" for f in files
             )
             detected_language = extract_language(combined_text)
-            cap = TEMPLATE.format(
-                query=search,
-                title=imdb['title'],
-                votes=imdb['votes'],
-                aka=imdb["aka"],
-                seasons=imdb["seasons"],
-                box_office=imdb['box_office'],
-                localized_title=imdb['localized_title'],
-                kind=imdb['kind'],
-                imdb_id=imdb["imdb_id"],
-                cast=imdb['cast'],
-                runtime=imdb['runtime'],
-                countries=imdb['countries'],
-                certificates=imdb['certificates'],
-                languages=detected_language if detected_language != "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ" else imdb['languages'],
-                director=imdb['director'],
-                writer=imdb['writer'],
-                producer=imdb['producer'],
-                composer=imdb['composer'],
-                cinematographer=imdb['cinematographer'],
-                music_team=imdb['music_team'],
-                distributors=imdb['distributors'],
-                release_date=imdb['release_date'],
-                year=imdb['year'],
-                genres=imdb['genres'],
-                poster=imdb['poster'],
-                plot=imdb['plot'] if settings.get('button') else "N/A",
-                rating=imdb['rating'],
-                url=imdb['url'],
-                grp_lnk=BACKUP_CHANNEL_LINK,
-                **locals()
-            )
+            lang_show = detected_language if detected_language != "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ" else (imdb.get('languages') or "")
+            # Style C for BOTH button + text mode
+            try:
+                cap = TEMPLATE.format(
+                    query=search,
+                    title=imdb.get('title') or search,
+                    votes=imdb.get('votes'),
+                    aka=imdb.get("aka"),
+                    seasons=imdb.get("seasons"),
+                    box_office=imdb.get('box_office'),
+                    localized_title=imdb.get('localized_title'),
+                    kind=imdb.get('kind'),
+                    imdb_id=imdb.get("imdb_id"),
+                    cast=imdb.get('cast'),
+                    runtime=imdb.get('runtime'),
+                    countries=imdb.get('countries'),
+                    certificates=imdb.get('certificates'),
+                    languages=lang_show,
+                    director=imdb.get('director'),
+                    writer=imdb.get('writer'),
+                    producer=imdb.get('producer'),
+                    composer=imdb.get('composer'),
+                    cinematographer=imdb.get('cinematographer'),
+                    music_team=imdb.get('music_team'),
+                    distributors=imdb.get('distributors'),
+                    release_date=imdb.get('release_date'),
+                    year=imdb.get('year') or "",
+                    genres=imdb.get('genres') or "",
+                    poster=imdb.get('poster'),
+                    plot=imdb.get('plot') or "N/A",
+                    rating=imdb.get('rating') or "",
+                    url=imdb.get('url') or "",
+                    grp_lnk=BACKUP_CHANNEL_LINK,
+                    total_results=total_results,
+                    remaining_seconds=remaining_seconds,
+                    message=message,
+                )
+            except Exception:
+                # fallback Style C with IMDB meta
+                cap = _result_header(
+                    imdb.get('title') or search, total_results, remaining_seconds, message.from_user,
+                    with_imdb_meta=True,
+                    rating=imdb.get('rating'),
+                    genres=imdb.get('genres'),
+                    languages=lang_show,
+                    year=imdb.get('year'),
+                    url=imdb.get('url'),
+                )
             temp.IMDB_CAP[message.from_user.id] = cap
             if not settings.get('button'):
-                cap += "\n\n<b>📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>\n"
                 for idx, file in enumerate(files, start=1):
                     cap += _text_file_line(file, idx, message.chat.id)
         else:
+            # No IMDB / no poster → Style C without rating, genre, audio
             temp.IMDB_CAP[message.from_user.id] = None
-            cap = _result_header(search, total_results, remaining_seconds, message.from_user)
-            if settings.get('button'):
-                cap += "\n<b>📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>  <i>(buttons below)</i>\n"
-            else:
-                cap += "\n<b>📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>\n"
+            cap = _result_header(search, total_results, remaining_seconds, message.from_user, with_imdb_meta=False)
+            if not settings.get('button'):
                 for idx, file in enumerate(files, start=1):
                     cap += _text_file_line(file, idx, message.chat.id)
 
