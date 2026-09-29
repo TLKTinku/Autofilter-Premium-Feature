@@ -125,6 +125,8 @@ def _pro_file_parts(file, max_title=22):
         r"brrip|hdrip|hdtv|x264|x265|hevc|av1|aac|dts|atmos|dd[p]?\d*|ac3|eac3|"
         r"dual[- ]?audio|multi[- ]?audio|hindi|english|tamil|telugu|malayalam|kannada|"
         r"punjabi|gujarati|marathi|bengali|mkv|mp4|avi|mov|yts|ssfilms|"
+        r"rogmovies|hindiclean|hindi\s*clear|uncut|south\s*movie|esub|ds4k|nf\s*x?\d*|"
+        r"hq|org|proper|repack|remux|extended|directors?\s*cut|"
         r"5\.1|2\.0|7\.1|10bit|8bit|hdr|sdr)\b",
         " ",
         title,
@@ -2795,10 +2797,8 @@ async def auto_filter(client, msg, spoll=False):
                       seconds=(curr_time.second+(curr_time.microsecond/1000000)))
         remaining_seconds = "{:.2f}".format(time_difference.total_seconds())
 
-        TEMPLATE = script.IMDB_TEMPLATE_TXT
+        # Style C is ALWAYS used (ignore old custom group template)
         settings = await get_settings(message.chat.id)
-        if settings.get('template'):
-            TEMPLATE = settings['template']
 
         if imdb:
             combined_text = " ".join(
@@ -2806,59 +2806,28 @@ async def auto_filter(client, msg, spoll=False):
             )
             detected_language = extract_language(combined_text)
             lang_show = detected_language if detected_language != "Nᴏᴛ Aᴠᴀɪʟᴀʙʟᴇ" else (imdb.get('languages') or "")
-            # Style C for BOTH button + text mode
-            try:
-                cap = TEMPLATE.format(
-                    query=search,
-                    title=imdb.get('title') or search,
-                    votes=imdb.get('votes'),
-                    aka=imdb.get("aka"),
-                    seasons=imdb.get("seasons"),
-                    box_office=imdb.get('box_office'),
-                    localized_title=imdb.get('localized_title'),
-                    kind=imdb.get('kind'),
-                    imdb_id=imdb.get("imdb_id"),
-                    cast=imdb.get('cast'),
-                    runtime=imdb.get('runtime'),
-                    countries=imdb.get('countries'),
-                    certificates=imdb.get('certificates'),
-                    languages=lang_show,
-                    director=imdb.get('director'),
-                    writer=imdb.get('writer'),
-                    producer=imdb.get('producer'),
-                    composer=imdb.get('composer'),
-                    cinematographer=imdb.get('cinematographer'),
-                    music_team=imdb.get('music_team'),
-                    distributors=imdb.get('distributors'),
-                    release_date=imdb.get('release_date'),
-                    year=imdb.get('year') or "",
-                    genres=imdb.get('genres') or "",
-                    poster=imdb.get('poster'),
-                    plot=imdb.get('plot') or "N/A",
-                    rating=imdb.get('rating') or "",
-                    url=imdb.get('url') or "",
-                    grp_lnk=BACKUP_CHANNEL_LINK,
-                    total_results=total_results,
-                    remaining_seconds=remaining_seconds,
-                    message=message,
-                )
-            except Exception:
-                # fallback Style C with IMDB meta
-                cap = _result_header(
-                    imdb.get('title') or search, total_results, remaining_seconds, message.from_user,
-                    with_imdb_meta=True,
-                    rating=imdb.get('rating'),
-                    genres=imdb.get('genres'),
-                    languages=lang_show,
-                    year=imdb.get('year'),
-                    url=imdb.get('url'),
-                )
+            rating_show = imdb.get('rating') or ""
+            if rating_show and not str(rating_show).startswith("<a"):
+                url = imdb.get('url') or ""
+                rating_show = f'<a href="{url}/ratings">{rating_show}</a>' if url else rating_show
+            cap = _result_header(
+                imdb.get('title') or search,
+                total_results,
+                remaining_seconds,
+                message.from_user,
+                with_imdb_meta=True,
+                rating=rating_show,
+                genres=imdb.get('genres') or "",
+                languages=lang_show,
+                year=imdb.get('year') or "",
+                url=imdb.get('url') or "",
+            )
             temp.IMDB_CAP[message.from_user.id] = cap
             if not settings.get('button'):
                 for idx, file in enumerate(files, start=1):
                     cap += _text_file_line(file, idx, message.chat.id)
         else:
-            # No IMDB / no poster → Style C without rating, genre, audio
+            # No IMDB → Style C without rating / genre / audio
             temp.IMDB_CAP[message.from_user.id] = None
             cap = _result_header(search, total_results, remaining_seconds, message.from_user, with_imdb_meta=False)
             if not settings.get('button'):
