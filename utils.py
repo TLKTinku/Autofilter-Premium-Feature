@@ -520,6 +520,8 @@ def pretty_file_label(file, max_title=None):
         r"brrip|hdrip|hdtv|x264|x265|hevc|av1|aac|dts|atmos|dd[p]?\d*|ac3|eac3|"
         r"dual[- ]?audio|multi[- ]?audio|hindi|english|tamil|telugu|malayalam|kannada|"
         r"punjabi|gujarati|marathi|bengali|mkv|mp4|avi|mov|yts|ssfilms|"
+        r"rogmovies|hindiclean|hindi\s*clear|uncut|south\s*movie|esub|ds4k|nf\s*x?\d*|"
+        r"hq|org|proper|repack|remux|extended|directors?\s*cut|"
         r"5\.1|2\.0|7\.1|10bit|8bit|hdr|sdr)\b",
         " ", title, flags=re.I,
     )

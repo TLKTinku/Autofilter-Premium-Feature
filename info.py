@@ -215,8 +215,31 @@ BAD_WORDS = {
     "www",
     "villa",
     "tg",
-    "original"
-} # Set of bad words to filter out
+    "original",
+    # release-group / junk tags (text mode names)
+    "rogmovies",
+    "hindiclean",
+    "hindi clear",
+    "uncut",
+    "south movie",
+    "southmovie",
+    "esub",
+    "nf",
+    "ds4k",
+    "x264",
+    "x265",
+    "hevc",
+    "webrip",
+    "webdl",
+    "bluray",
+    "hdrip",
+    "hq",
+    "org",
+    "proper",
+    "repack",
+    "mkv",
+    "mp4",
+}
    
 
 # ============================
