@@ -477,6 +477,87 @@ def clean_filename(file_name):
         return fallback or str(file_name)
     return cleaned
 
+
+def pretty_file_label(file, max_title=None):
+    """
+    Short CORRECT display name for text-mode lists:
+      1080P · Harry Potter 20th Anniversary · 2.56 GB
+      S01E07 · 720P · The Boys · 762.9 MB
+    """
+    name = clean_filename(getattr(file, "file_name", None) or "File")
+    raw = name.lower().replace("_", " ").replace(".", " ")
+    size = get_size(getattr(file, "file_size", 0) or 0)
+
+    quality = ""
+    for tag, show in (
+        ("2160p", "4K"), ("4k", "4K"), ("1440p", "1440P"),
+        ("1080p", "1080P"), ("720p", "720P"), ("480p", "480P"), ("360p", "360P"),
+    ):
+        if re.search(rf"(?<!\d){re.escape(tag)}" if tag.endswith("p") else rf"(?<![a-z0-9]){re.escape(tag)}(?![a-z0-9])", raw):
+            quality = show
+            break
+
+    episode = ""
+    m = re.search(r"\bS(?:0?\d{1,2})\s*E(?:0?\d{1,3})\b", raw, re.I)
+    if m:
+        token = re.sub(r"\s+", "", m.group(0)).upper()
+        sm = re.search(r"S(\d+)", token)
+        em = re.search(r"E(\d+)", token)
+        episode = f"S{int(sm.group(1)):02d}E{int(em.group(1)):02d}" if sm and em else token
+    else:
+        season_m = re.search(r"\bS(?:eason\s*)?(0?\d{1,2})\b", raw, re.I)
+        ep_m = re.search(r"\b(?:episode|ep)\s*0*(\d{1,3})\b|\be0*(\d{1,3})\b", raw, re.I)
+        if ep_m:
+            ep_num = int(ep_m.group(1) or ep_m.group(2))
+            episode = f"S{int(season_m.group(1)):02d}E{ep_num:02d}" if season_m else f"E{ep_num:02d}"
+        elif season_m:
+            episode = f"S{int(season_m.group(1)):02d}"
+
+    title = re.sub(r"\.[A-Za-z0-9]{1,8}$", "", name)
+    title = re.sub(r"[._]+", " ", title)
+    title = re.sub(
+        r"\b(?:2160p|1440p|1080p|720p|480p|360p|4k|web[- ]?dl|webrip|web|bluray|blu[- ]?ray|"
+        r"brrip|hdrip|hdtv|x264|x265|hevc|av1|aac|dts|atmos|dd[p]?\d*|ac3|eac3|"
+        r"dual[- ]?audio|multi[- ]?audio|hindi|english|tamil|telugu|malayalam|kannada|"
+        r"punjabi|gujarati|marathi|bengali|mkv|mp4|avi|mov|yts|ssfilms|"
+        r"5\.1|2\.0|7\.1|10bit|8bit|hdr|sdr)\b",
+        " ", title, flags=re.I,
+    )
+    title = re.sub(r"\b(?:5|2|7)\s+1\b", " ", title)
+    title = re.sub(r"(?<!\d)\b[0-9]\b(?!\d)", " ", title)
+    title = re.sub(r"\s+", " ", title).strip(" -._")
+    if episode:
+        title = re.sub(r"\bS\d{1,2}E\d{1,3}\b", " ", title, flags=re.I)
+        title = re.sub(r"\s+", " ", title).strip(" -._")
+    title = title.title() if title else "File"
+    # Text mode: never cut with "…". Buttons may pass a small max_title.
+    if max_title and len(title) > max_title:
+        cut = title[:max_title].rsplit(" ", 1)[0].rstrip(" -.,")
+        title = cut if len(cut) >= 8 else title[:max_title].rstrip()
+
+    # Language: 3+ Multi | 2 both | 1 one | 0 none
+    langs = []
+    for token, label in (
+        ("hindi", "Hindi"), ("english", "English"), ("tamil", "Tamil"),
+        ("telugu", "Telugu"), ("malayalam", "Malayalam"), ("kannada", "Kannada"),
+        ("punjabi", "Punjabi"), ("gujarati", "Gujarati"), ("marathi", "Marathi"),
+        ("bengali", "Bengali"),
+    ):
+        if token in raw and label not in langs:
+            langs.append(label)
+    if re.search(r"\bmulti[\s._-]?audio\b|\bmulti\b", raw) or len(langs) >= 3:
+        language = "Multi"
+    elif re.search(r"\bdual[\s._-]?audio\b|\bdual\b", raw):
+        language = "/".join(langs[:2]) if len(langs) >= 2 else "Dual"
+    elif len(langs) >= 2:
+        language = "/".join(langs[:2])
+    elif len(langs) == 1:
+        language = langs[0]
+    else:
+        language = ""
+
+    return " · ".join(x for x in (episode, quality, title, language, size) if x)
+
 QUALITY_PATTERNS = [
     '2160p', '4k', '1080p', '720p', '480p', '360p', 'hdrip', 'webrip',
     'web-dl', 'webdl', 'bluray', 'brrip', 'dvdrip', 'hdtv', 'pre-dvd',
@@ -993,16 +1074,18 @@ async def get_cap(settings, remaining_seconds, files, query, total_results, sear
             IMDB_CAP = temp.IMDB_CAP.get(query.from_user.id)
             if IMDB_CAP:
                 cap = IMDB_CAP
-                cap += "\n\n<u>Your Requested Files Are Here</u>\n\n</b>"
+                if "ʏᴏᴜʀ ꜰɪʟᴇꜱ" not in cap and "YOUR FILES" not in cap.upper():
+                    cap += "\n\n<b>📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>\n"
+                else:
+                    cap += "\n"
                 for idx, file in enumerate(files, start=offset + 1):
-                        cap += (
-                            f"<b>{idx}. "
-                            f"<a href='https://telegram.me/{temp.U_NAME}"
-                            f"?start=file_{query.message.chat.id}_{file.file_id}'>"
-                            f"[{get_size(file.file_size)}] "
-                            f"{clean_filename(file.file_name)}\n\n"
-                            f"</a></b>"
-                        )
+                    label = pretty_file_label(file, max_title=None)
+                    cap += (
+                        f"<b>{idx}. "
+                        f"<a href='https://telegram.me/{temp.U_NAME}"
+                        f"?start=file_{query.message.chat.id}_{file.file_id}'>"
+                        f"{label}</a></b>\n"
+                    )
             else:
                 if settings["imdb"]:
                     imdb = await get_posterx(search, file=(files[0]).file_name) if TMDB_ON_SEARCH else await get_poster(search, file=(files[0]).file_name)
@@ -1048,67 +1131,44 @@ async def get_cap(settings, remaining_seconds, files, query, total_results, sear
                     )
                     
                     for idx, file in enumerate(files, start=offset+1):
+                        label = pretty_file_label(file, max_title=None)
                         cap += (
                             f"<b>{idx}. "
                             f"<a href='https://telegram.me/{temp.U_NAME}"
                             f"?start=file_{query.message.chat.id}_{file.file_id}'>"
-                            f"[{get_size(file.file_size)}] "
-                            f"{clean_filename(file.file_name)}\n\n"
-                            f"</a></b>"
+                            f"{label}</a></b>\n"
                         )
                 else:
-                    if ULTRA_FAST_MODE:
-                        cap = (
-                            f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n"
-                            f"⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n"
-                            f"📝 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {query.from_user.mention}\n"
-                            f"⚜️ ᴘᴏᴡᴇʀᴇᴅ ʙʏ :⚡ {query.message.chat.title or temp.B_LINK or 'ᴅʀᴇᴀᴍxʙᴏᴛᴢ'}\n</b>"
-                        )
-                    else:
-                        cap = (
-                            f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n"
-                            f"🧱 ᴛᴏᴛᴀʟ ꜰɪʟᴇꜱ : <code>{total_results}</code>\n"
-                            f"⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n"
-                            f"📝 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {query.from_user.mention}\n"
-                            f"⚜️ ᴘᴏᴡᴇʀᴇᴅ ʙʏ :⚡ {query.message.chat.title or temp.B_LINK or 'ᴅʀᴇᴀᴍxʙᴏᴛᴢ'}\n</b>"
-                        )
-                    cap += "\n\n<u>Your Requested Files Are Here</u> \n\n</b>"
+                    cap = (
+                        f"<b>{search.title() if search else search}</b>\n\n"
+                        f"sʜᴏᴡɴ ɪɴ : {remaining_seconds} sᴇᴄ⚡️\n"
+                        f"ʀᴇǫ ʙʏ : {query.from_user.mention}\n\n"
+                        f"📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ\n"
+                    )
                     for idx, file in enumerate(files, start=offset + 1):
+                        label = pretty_file_label(file, max_title=None)
                         cap += (
                             f"<b>{idx}. "
                             f"<a href='https://telegram.me/{temp.U_NAME}"
                             f"?start=file_{query.message.chat.id}_{file.file_id}'>"
-                            f"[{get_size(file.file_size)}] "
-                            f"{clean_filename(file.file_name)}\n\n"
-                            f"</a></b>"
+                            f"{label}</a></b>\n"
                         )
 
         else:
-            if ULTRA_FAST_MODE:
-                cap = (
-                    f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n"
-                    f"⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n"
-                    f"⚜️ ᴘᴏᴡᴇʀᴇᴅ ʙʏ : ⚡ {query.message.chat.title or temp.B_LINK or 'ᴅʀᴇᴀᴍxʙᴏᴛᴢ'}\n</b>"
+            cap = (
+                f"<b>{search.title() if search else search}</b>\n\n"
+                f"sʜᴏᴡɴ ɪɴ : {remaining_seconds} sᴇᴄ⚡️\n"
+                f"ʀᴇǫ ʙʏ : {query.from_user.mention}\n\n"
+                f"📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ\n"
+            )
+            for idx, file in enumerate(files, start=offset + 1):
+                label = pretty_file_label(file, max_title=None)
+                cap += (
+                    f"<b>{idx}. "
+                    f"<a href='https://telegram.me/{temp.U_NAME}"
+                    f"?start=file_{query.message.chat.id}_{file.file_id}'>"
+                    f"{label}</a></b>\n"
                 )
-            else:
-                cap = (
-                    f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n"
-                    f"🧱 ᴛᴏᴛᴀʟ ꜰɪʟᴇꜱ : <code>{total_results}</code>\n"
-                    f"⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n"
-                    f"📝 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {query.from_user.mention}\n"
-                    f"⚜️ ᴘᴏᴡᴇʀᴇᴅ ʙʏ : ⚡ {query.message.chat.title or temp.B_LINK or 'ᴅʀᴇᴀᴍxʙᴏᴛᴢ'}\n</b>"
-                )
-
-            cap += "\n\n<u>Your Requested Files Are Here</u>\n\n</b>"
-            for idx, file in enumerate(files, start=offset):
-                        cap += (
-                            f"<b>{idx}. "
-                            f"<a href='https://telegram.me/{temp.U_NAME}"
-                            f"?start=file_{query.message.chat.id}_{file.file_id}'>"
-                            f"[{get_size(file.file_size)}] "
-                            f"{clean_filename(file.file_name)}\n\n"
-                            f"</a></b>"
-                        )
         return cap
     except Exception as e:
         logging.error(f"Error in get_cap: {e}")

@@ -265,19 +265,20 @@ Mᴇꜱꜱᴀɢᴇ : <b>{}</b>"""
 """
 
 
-    IMDB_TEMPLATE_TXT = """<b>╭─❰ 🎬 MOVIE INFO ❱─╮
+    IMDB_TEMPLATE_TXT = """<b>╭──────────────────────────────╮
+│ 🎬 <a href={url}>{title}</a>
+│ ({year})
+├──────────────────────────────┤
+│ ★ ʀᴀᴛɪɴɢ  ›  <a href={url}/ratings>{rating}</a>
+│ 🎭 ɢᴇɴʀᴇ  ›  {genres}
+│ 🎧 ᴀᴜᴅɪᴏ  ›  {languages}
+│ 📁 ꜰɪʟᴇꜱ  ›  {total_results}
+│ ⚡ ᴛɪᴍᴇ   ›  {remaining_seconds} sᴇᴄ
+│ 👤 ʀᴇǫ    ›  {message.from_user.mention}
+╰──────────────────────────────╯
 
-<a href={url}>{title}</a> (<a href={url}/releaseinfo>{year}</a>)
-
-⭐ Rating   : <a href={url}/ratings>{rating}</a>/10
-🎭 Genre    : {genres}
-🗣️ Audio    : {languages}
-⚡ Search   : {remaining_seconds} <i>sec</i>
-
-👤 Req By : {message.from_user.mention}
-
-╰──────────────╯
-🎞 <a href={grp_lnk}>My Movies Offical ✓✓</a></b>"""
+📂 ʏᴏᴜʀ ꜰɪʟᴇꜱ</b>
+"""
 
     LOGO = r"""
     ████████╗███████╗ ██████╗██╗  ██╗ ██████╗     ██╗  ██╗██████╗ ██╗███████╗███████╗██╗  ██╗
