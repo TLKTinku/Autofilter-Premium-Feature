@@ -30,34 +30,46 @@ logger = logging.getLogger(__name__)
 def _ikb(text, callback_data=None, url=None, style=None):
     """
     Inline button with optional colour (Bot API 9.4 / pyrofork ButtonStyle).
-    style: 'primary' (blue) | 'success' (green) | 'danger' (red)
-    Older Telegram clients ignore style safely.
+    style: primary|success|danger
+
+    pyrofork 2.3.x often does NOT send style → TypeError fallback.
+    Emoji in label is the reliable visual cue on all clients.
     """
     kwargs = {"text": text}
     if callback_data is not None:
         kwargs["callback_data"] = callback_data
     if url is not None:
         kwargs["url"] = url
+
+    style_val = None
     if style:
+        s = str(style).lower()
         try:
             from pyrogram.enums import ButtonStyle
-            _map = {
+            style_val = {
                 "primary": ButtonStyle.PRIMARY,
                 "success": ButtonStyle.SUCCESS,
                 "danger": ButtonStyle.DANGER,
                 "blue": ButtonStyle.PRIMARY,
                 "green": ButtonStyle.SUCCESS,
                 "red": ButtonStyle.DANGER,
-            }
-            kwargs["style"] = _map.get(str(style).lower(), style)
+            }.get(s, s)
         except Exception:
-            kwargs["style"] = style
+            style_val = s
+
+    if style_val is not None:
+        kwargs["style"] = style_val
     try:
-        return InlineKeyboardButton(**kwargs)
+        btn = InlineKeyboardButton(**kwargs)
     except TypeError:
-        # library without style support
         kwargs.pop("style", None)
-        return InlineKeyboardButton(**kwargs)
+        btn = InlineKeyboardButton(**kwargs)
+    if style_val is not None:
+        try:
+            btn.style = style_val
+        except Exception:
+            pass
+    return btn
 
 
 def _premium_send_row(key):
@@ -220,14 +232,13 @@ def _file_btn_rows(file):
     prefix = "📥 "
     fixed = f"{prefix}{head} · " if head else prefix
     room = 64 - len(fixed)
-    # title + size (lang optional if room)
     size_part = size or ""
     budget = room - (len(size_part) + 3 if size_part else 0)
-    short_title = title if len(title) <= budget else (title[: max(budget - 1, 6)].rsplit(" ", 1)[0] or title[:budget - 1]) + "…"
+    short_title = title if len(title) <= budget else (title[: max(budget - 1, 6)].rsplit(" ", 1)[0] or title[:budget - 1])
     tail = f"{short_title} · {size_part}" if size_part else short_title
     label = (fixed + tail)[:64]
-    # File download buttons → blue (primary)
-    return [[_ikb(label, callback_data=cb, style="primary")]]
+    # No colour on file buttons (user preference)
+    return [[_ikb(label, callback_data=cb)]]
 
 
 def _text_file_line(file, idx, chat_id):
@@ -2783,9 +2794,22 @@ async def auto_filter(client, msg, spoll=False):
         imdb = None
         if settings.get('imdb'):
             try:
-                imdb = await get_posterx(search, file=(files[0]).file_name) if TMDB_POSTER else await get_poster(search, file=(files[0]).file_name)
+                if TMDB_POSTER:
+                    imdb = await get_posterx(search, file=(files[0]).file_name)
+                    if not imdb or not (imdb.get('poster') or imdb.get('poster_url')):
+                        imdb = await get_poster(search, file=(files[0]).file_name) or imdb
+                else:
+                    imdb = await get_poster(search, file=(files[0]).file_name)
+                    if not imdb or not imdb.get('poster'):
+                        try:
+                            imdb = await get_posterx(search, file=(files[0]).file_name) or imdb
+                        except Exception:
+                            pass
             except Exception:
-                imdb = None
+                try:
+                    imdb = await get_poster(search, file=(files[0]).file_name)
+                except Exception:
+                    imdb = None
 
         cur_time = datetime.now(pytz.timezone('Asia/Kolkata')).time()
         time_difference = timedelta(hours=cur_time.hour, minutes=cur_time.minute, seconds=(cur_time.second+(cur_time.microsecond/1000000))) - \
@@ -2806,7 +2830,7 @@ async def auto_filter(client, msg, spoll=False):
             if rating_show and not str(rating_show).startswith("<a"):
                 url = imdb.get('url') or ""
                 rating_show = f'<a href="{url}/ratings">{rating_show}</a>' if url else rating_show
-            cap = _result_header(
+            header = _result_header(
                 imdb.get('title') or search,
                 total_results,
                 remaining_seconds,
@@ -2818,50 +2842,90 @@ async def auto_filter(client, msg, spoll=False):
                 year=imdb.get('year') or "",
                 url=imdb.get('url') or "",
             )
-            temp.IMDB_CAP[message.from_user.id] = cap
-            if not settings.get('button'):
-                for idx, file in enumerate(files, start=1):
-                    cap += _text_file_line(file, idx, message.chat.id)
+            temp.IMDB_CAP[message.from_user.id] = header
         else:
             # No IMDB → Style C without rating / genre / audio
             temp.IMDB_CAP[message.from_user.id] = None
-            cap = _result_header(search, total_results, remaining_seconds, message.from_user, with_imdb_meta=False)
-            if not settings.get('button'):
-                for idx, file in enumerate(files, start=1):
-                    cap += _text_file_line(file, idx, message.chat.id)
+            header = _result_header(search, total_results, remaining_seconds, message.from_user, with_imdb_meta=False)
+
+        # Build caption. Photo caption max = 1024. Text mode file list must fit.
+        cap = header
+        if not settings.get('button'):
+            for idx, file in enumerate(files, start=1):
+                line = _text_file_line(file, idx, message.chat.id)
+                if len(cap) + len(line) > 1000:
+                    cap += f"\n<i>… +{max(0, int(total_results or len(files)) - idx + 1)} more (next page)</i>\n"
+                    break
+                cap += line
+        if len(cap) > 1024:
+            cap = cap[:1020] + "…"
 
         # PRO title-group UI disabled — always show direct file buttons
         sent = None
+        markup = btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn)
         try:
-            # Always prefer MAIN movie poster (not landscape backdrop)
-            photo = (imdb.get('poster') if imdb else None) or (imdb.get('backdrop') if imdb else None)
+            photo = None
+            if imdb:
+                photo = imdb.get('poster') or imdb.get('backdrop') or imdb.get('poster_url')
+            # Prefer Telegram-friendly sizes if URL is image.tmdb.org
+            photo_candidates = []
             if photo:
-                try:
-                    sent = await message.reply_photo(photo=photo, caption=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), parse_mode=enums.ParseMode.HTML)
-                    if m:
-                        await m.delete()
-                except (MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty):
-                    pic = (imdb or {}).get('poster') or (imdb or {}).get('backdrop')
+                photo_candidates.append(photo)
+                if "image.tmdb.org" in str(photo):
+                    photo_candidates.append(str(photo).replace("/original", "/w500").replace("/w780", "/w500").replace("/w1280", "/w500"))
+                if ".jpg" in str(photo):
+                    photo_candidates.append(str(photo).replace(".jpg", "._V1_UX360.jpg"))
+
+            if photo_candidates:
+                last_err = None
+                for pic in photo_candidates:
                     try:
-                        if pic:
-                            alt = pic.replace('.jpg', "._V1_UX360.jpg") if '.jpg' in pic else pic
-                            sent = await message.reply_photo(photo=alt, caption=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), parse_mode=enums.ParseMode.HTML)
-                        else:
-                            sent = await message.reply_text(text=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
-                    except Exception:
-                        sent = await message.reply_text(text=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
-                    if m:
+                        sent = await message.reply_photo(
+                            photo=pic,
+                            caption=cap,
+                            reply_markup=markup,
+                            parse_mode=enums.ParseMode.HTML,
+                        )
+                        last_err = None
+                        break
+                    except (MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty) as e:
+                        last_err = e
+                        continue
+                    except Exception as e:
+                        # Caption too long / other — try short header-only caption once
+                        last_err = e
                         try:
-                            await m.delete()
-                        except Exception:
-                            pass
-                except Exception as e:
-                    logger.exception(e)
-                    sent = await message.reply_text(text=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
+                            sent = await message.reply_photo(
+                                photo=pic,
+                                caption=header[:1024],
+                                reply_markup=markup,
+                                parse_mode=enums.ParseMode.HTML,
+                            )
+                            last_err = None
+                            break
+                        except Exception as e2:
+                            last_err = e2
+                            continue
+                if sent is None:
+                    logger.exception("Poster send failed: %s", last_err)
+                    sent = await message.reply_text(
+                        text=cap,
+                        reply_markup=markup,
+                        disable_web_page_preview=True,
+                        parse_mode=enums.ParseMode.HTML,
+                    )
             else:
-                sent = await message.reply_text(text=cap, reply_markup=btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn), disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
-                if m:
+                sent = await message.reply_text(
+                    text=cap,
+                    reply_markup=markup,
+                    disable_web_page_preview=True,
+                    parse_mode=enums.ParseMode.HTML,
+                )
+            if m:
+                try:
                     await m.delete()
+                except Exception:
+                    pass
         except Exception as e:
             logger.exception("Failed to send result: %s", e)
             return
