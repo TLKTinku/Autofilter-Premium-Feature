@@ -2801,11 +2801,12 @@ async def auto_filter(client, msg, spoll=False):
             temp.IMDB_CAP[message.from_user.id] = None
             header = _result_header(search, total_results, remaining_seconds, message.from_user, with_imdb_meta=False)
 
-        # Full page files always (no skip). Photo only if caption fits in 1024.
-        cap = header
+        # Full page files always (no skip).
+        file_lines = ""
         if not settings.get('button'):
             for idx, file in enumerate(files, start=1):
-                cap += _text_file_line(file, idx, message.chat.id)
+                file_lines += _text_file_line(file, idx, message.chat.id)
+        cap = header + file_lines
 
         sent = None
         markup = btn if isinstance(btn, InlineKeyboardMarkup) else InlineKeyboardMarkup(btn)
@@ -2814,18 +2815,25 @@ async def auto_filter(client, msg, spoll=False):
             if imdb:
                 photo = imdb.get('poster') or imdb.get('backdrop') or imdb.get('poster_url')
 
-            use_photo = bool(photo) and len(cap) <= 1024
-            if use_photo:
+            # Poster should always show when available. Telegram's photo-caption
+            # limit is 1024 chars: if header+files fits, send it all together;
+            # otherwise send the poster with just the header (always short) and
+            # follow up with the file list as a normal text message, so the
+            # poster is never dropped just because there are many files.
+            photo_cap = cap if len(cap) <= 1024 else header
+            overflow = file_lines if len(cap) > 1024 else ""
+
+            if photo:
                 try:
                     sent = await message.reply_photo(
-                        photo=photo, caption=cap, reply_markup=markup,
+                        photo=photo, caption=photo_cap, reply_markup=markup,
                         parse_mode=enums.ParseMode.HTML,
                     )
                 except (MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty):
                     try:
                         alt = str(photo).replace('.jpg', '._V1_UX360.jpg') if '.jpg' in str(photo) else photo
                         sent = await message.reply_photo(
-                            photo=alt, caption=cap, reply_markup=markup,
+                            photo=alt, caption=photo_cap, reply_markup=markup,
                             parse_mode=enums.ParseMode.HTML,
                         )
                     except Exception:
@@ -2834,10 +2842,19 @@ async def auto_filter(client, msg, spoll=False):
                     sent = None
 
             if sent is None:
+                # No poster (or it failed) — fall back to plain text with everything.
                 sent = await message.reply_text(
                     text=cap, reply_markup=markup,
                     disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML,
                 )
+            elif overflow:
+                # Poster sent with short caption — send the file list right after it.
+                for chunk_start in range(0, len(overflow), 4000):
+                    chunk = overflow[chunk_start:chunk_start + 4000]
+                    await message.reply_text(
+                        text=chunk, disable_web_page_preview=True,
+                        parse_mode=enums.ParseMode.HTML,
+                    )
             if m:
                 try:
                     await m.delete()
