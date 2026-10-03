@@ -2927,7 +2927,10 @@ async def advantage_spell_chok(client, message):
         google = search.replace(" ", "+")
         button = [[InlineKeyboardButton(
             "🔍 ᴄʜᴇᴄᴋ sᴘᴇʟʟɪɴɢ ᴏɴ ɢᴏᴏɢʟᴇ 🔍", url=f"https://www.google.com/search?q={google}")]]
-        k = await message.reply_text(text=script.I_CUDNT.format(search), reply_markup=InlineKeyboardMarkup(button))
+        try:
+            k = await message.reply_photo(photo=NOR_IMG, caption=script.I_CUDNT.format(search), reply_markup=InlineKeyboardMarkup(button))
+        except Exception:
+            k = await message.reply_text(text=script.I_CUDNT.format(search), reply_markup=InlineKeyboardMarkup(button))
 
         req_key = f"{chat_id}-{mv_id}"
         OWNER_REQ_CACHE[req_key] = {
@@ -2956,7 +2959,10 @@ async def advantage_spell_chok(client, message):
          ] for movie in movies]
 
     buttons.append([_ikb("🚫 ᴄʟᴏsᴇ", callback_data="close_data", style="danger")])
-    d = await message.reply_text(text=script.CUDNT_FND.format(message.from_user.mention), reply_markup=InlineKeyboardMarkup(buttons), reply_to_message_id=message.id)
+    try:
+        d = await message.reply_photo(photo=SPELL_IMG, caption=script.CUDNT_FND.format(message.from_user.mention), reply_markup=InlineKeyboardMarkup(buttons), reply_to_message_id=message.id)
+    except Exception:
+        d = await message.reply_text(text=script.CUDNT_FND.format(message.from_user.mention), reply_markup=InlineKeyboardMarkup(buttons), reply_to_message_id=message.id)
     await asyncio.sleep(60)
     await d.delete()
     try:
