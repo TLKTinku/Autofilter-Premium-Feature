@@ -1,4 +1,4 @@
-from utils import get_size, is_subscribed, is_req_subscribed, group_setting_buttons, get_poster, get_posterx, temp, get_settings, save_group_settings, get_cap, imdb, is_check_admin, extract_request_content, log_error, clean_filename, generate_season_variations, clean_search_text, format_file_caption, extract_language
+from utils import get_size, is_subscribed, is_req_subscribed, group_setting_buttons, get_poster, get_posterx, temp, get_settings, save_group_settings, get_cap, imdb, is_check_admin, extract_request_content, log_error, clean_filename, generate_season_variations, clean_search_text, format_file_caption, extract_language, ikb
 import tracemalloc
 from fuzzywuzzy import process
 from dreamxbotz.util.file_properties import get_name, get_hash
@@ -51,14 +51,7 @@ async def _edit_filter_result(query, cap, btn):
             pass
 
 
-def _ikb(text, callback_data=None, url=None, style=None):
-    """Plain inline button (colours disabled — pehle jaisa)."""
-    kwargs = {"text": text}
-    if callback_data is not None:
-        kwargs["callback_data"] = callback_data
-    if url is not None:
-        kwargs["url"] = url
-    return InlineKeyboardButton(**kwargs)
+_ikb = ikb  # shared colour-safe button helper (utils.py)
 
 
 
@@ -419,15 +412,15 @@ def _pro_search_markup(state):
     if total_pages > 1:
         nav = []
         if page > 0:
-            nav.append(InlineKeyboardButton("◀ Previous", callback_data=f"mmprev#{state['key']}"))
+            nav.append(_ikb("◀ Previous", callback_data=f"mmprev#{state['key']}", style="primary"))
         nav.append(InlineKeyboardButton(f"{page + 1} / {total_pages}", callback_data="pages"))
         if end < len(groups):
-            nav.append(InlineKeyboardButton("Next ▶", callback_data=f"mmnext#{state['key']}"))
+            nav.append(_ikb("Next ▶", callback_data=f"mmnext#{state['key']}", style="primary"))
         rows.append(nav)
 
     rows.append([
         _ikb("💎 ᴘʀᴇᴍɪᴜᴍ", url=f"https://t.me/{temp.U_NAME}?start=premium", style="primary"),
-        InlineKeyboardButton("🏠 Home", callback_data="ui_home"),
+        _ikb("🏠 Home", callback_data="ui_home", style="primary"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -455,7 +448,7 @@ def _pro_detail_markup(key, files, next_offset, total_results, req):
     if nav:
         rows.append(nav)
     rows.append([
-        InlineKeyboardButton("⬅️ Back to Movies", callback_data=f"mback#{PRO_DETAIL[key]['search_key']}"),
+        _ikb("⬅️ Back to Movies", callback_data=f"mback#{PRO_DETAIL[key]['search_key']}", style="primary"),
         InlineKeyboardButton("🏠 Home", callback_data="ui_home"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -827,7 +820,7 @@ async def give_filter(client, message):
             f"<b>‼️ ᴛʜɪs ɪs ᴀ <u>sᴜᴘᴘᴏʀᴛ ɢʀᴏᴜᴘ</u> sᴏ ᴛʜᴀᴛ ʏᴏᴜ ᴄᴀɴ'ᴛ ɢᴇᴛ ғɪʟᴇs ғʀᴏᴍ ʜᴇʀᴇ...\n\n"
             f"📝 ꜱᴇᴀʀᴄʜ ʜᴇʀᴇ : 👇</b>",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("🔍 ᴊᴏɪɴ ᴀɴᴅ ꜱᴇᴀʀᴄʜ ʜᴇʀᴇ 🔎", url=GRP_LNK)]])
+                [[_ikb("🔍 ᴊᴏɪɴ ᴀɴᴅ ꜱᴇᴀʀᴄʜ ʜᴇʀᴇ 🔎", url=GRP_LNK, style="success")]])
         )
 
 
@@ -858,7 +851,7 @@ async def pm_text(bot, message):
                     "आप केवल हमारे 𝑴𝒐𝒗𝒊𝒆 𝑮𝒓𝒐𝒖𝒑 पर ही 𝑴𝒐𝒗𝒊𝒆 𝑺𝒆𝒂𝒓𝒄𝒉 कर सकते हो । "
                     "आपको 𝑫𝒊𝒓𝒆𝒄𝒕 𝑩𝒐𝒕 पर 𝑴𝒐𝒗𝒊𝒆 𝑺𝒆𝒂𝒓𝒄𝒉 करने की 𝑷𝒆𝒓𝒎𝒊𝒔𝒔𝒊𝒐𝒏 नहीं है कृपया नीचे दिए गए 𝑹𝑬𝑸𝑼𝑬𝑺𝑻 𝑯𝑬𝑹𝑬 वाले 𝑩𝒖𝒕𝒕𝒐𝒏 पर क्लिक करके हमारे 𝑴𝒐𝒗𝒊𝒆 𝑮𝒓𝒐𝒖𝒑 को 𝑱𝒐𝒊𝒏 करें और वहां पर अपनी मनपसंद 𝑴𝒐𝒗𝒊𝒆 𝑺𝒆𝒂𝒓𝒄𝒉 सर्च करें ।"
                     "</blockquote></b>"
-                ), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📝 ʀᴇǫᴜᴇsᴛ ʜᴇʀᴇ ", url=GRP_LNK)]]))
+                ), reply_markup=InlineKeyboardMarkup([[_ikb("📝 ʀᴇǫᴜᴇsᴛ ʜᴇʀᴇ ", url=GRP_LNK, style="primary")]]))
             await bot.send_message(chat_id=LOG_CHANNEL,
                                    text=(
                                        f"<b>#𝐏𝐌_𝐌𝐒𝐆\n\n"
@@ -879,8 +872,8 @@ async def refercall(bot, query):
         InlineKeyboardButton(
             f'⏳ {referdb.get_refer_points(query.from_user.id)} pts', callback_data='ref_point'),
     ],[
-        InlineKeyboardButton('⬅️ Back', callback_data='premium_info'),
-        InlineKeyboardButton('🏠 Home', callback_data='ui_home')
+        _ikb('⬅️ Back', callback_data='premium_info', style="primary"),
+        _ikb('🏠 Home', callback_data='ui_home', style="primary")
     ]]
     reply_markup = InlineKeyboardMarkup(btn)
     try:
@@ -1165,7 +1158,7 @@ async def advantage_spoll_choker(bot, query):
             except Exception as e:
                 print(f"Error In Spol - {e}   Make Sure Bot Admin BIN CHANNEL")
         btn = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("🔰Cʟɪᴄᴋ ʜᴇʀᴇ & ʀᴇǫᴜᴇsᴛ ᴛᴏ ᴀᴅᴍɪɴ🔰", url=OWNER_LNK)]])
+            [[_ikb("🔰Cʟɪᴄᴋ ʜᴇʀᴇ & ʀᴇǫᴜᴇsᴛ ᴛᴏ ᴀᴅᴍɪɴ🔰", url=OWNER_LNK, style="success")]])
         k = await query.message.edit(script.MVE_NT_FND, reply_markup=btn)
         await asyncio.sleep(10)
         await k.delete()
@@ -1473,7 +1466,7 @@ async def seasons_cb_handler(client: Client, query: CallbackQuery):
     # leave the old poster and title on screen.
     if key in PRO_DETAIL:
         btn: list[list[InlineKeyboardButton]] = [[
-            InlineKeyboardButton("📺 Select Season", callback_data="ident")
+            _ikb("📺 Select Season", callback_data="ident", style="primary")
         ]]
         season_numbers = []
         for raw in SEASONS:
@@ -1492,7 +1485,7 @@ async def seasons_cb_handler(client: Client, query: CallbackQuery):
                     callback_data=f"fs#s{season_numbers[i+1]:02d}#{key}"
                 ))
             btn.append(row)
-        btn.append([InlineKeyboardButton("↩ Back to Files", callback_data=f"mfilenext#{key}#0")])
+        btn.append([_ikb("↩ Back to Files", callback_data=f"mfilenext#{key}#0", style="primary")])
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
         return await query.answer()
 
@@ -1686,8 +1679,8 @@ async def request_owner_cb(client, query: CallbackQuery):
                 f"🆔 User id : <code>{reporter}</code>"
             ),
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Added, Search Again", callback_data=f"reqowner_added#{req_key}"),
-                InlineKeyboardButton("💬 Other Message", callback_data=f"reqowner_custom#{req_key}"),
+                _ikb("✅ Added, Search Again", callback_data=f"reqowner_added#{req_key}", style="success"),
+                _ikb("💬 Other Message", callback_data=f"reqowner_custom#{req_key}", style="primary"),
             ]])
         )
         # Persist so admin can reply anytime later, even after a restart
@@ -1725,7 +1718,7 @@ async def request_owner_added_cb(client, query: CallbackQuery):
         return await query.answer(f"Could not message the user: {e}", show_alert=True)
     try:
         await query.message.edit_reply_markup(InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Marked Added — user notified", callback_data="noop")
+            _ikb("✅ Marked Added — user notified", callback_data="noop", style="success")
         ]]))
     except Exception:
         pass
@@ -1767,7 +1760,7 @@ async def owner_custom_reply_handler(client, message):
 
 def _pro_add_back_to_titles(btn, key):
     if key in PRO_DETAIL:
-        btn.append([InlineKeyboardButton("🎬 Back to Movies", callback_data=f"mback#{PRO_DETAIL[key]['search_key']}")])
+        btn.append([_ikb("🎬 Back to Movies", callback_data=f"mback#{PRO_DETAIL[key]['search_key']}", style="primary")])
     return btn
 
 
@@ -1882,7 +1875,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
             btn += await is_subscribed(client, query.from_user.id, fsub_channels)
             btn += await is_req_subscribed(client, query.from_user.id, AUTH_REQ_CHANNELS)
             if btn:
-                btn.append([InlineKeyboardButton("♻️ ᴛʀʏ ᴀɢᴀɪɴ ♻️", callback_data=f"checksub#{kk}#{file_id}")])
+                btn.append([_ikb("♻️ ᴛʀʏ ᴀɢᴀɪɴ ♻️", callback_data=f"checksub#{kk}#{file_id}", style="primary")])
                 try:
                     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
                 except MessageNotModified:
@@ -1990,21 +1983,21 @@ async def cb_handler(client: Client, query: CallbackQuery):
     elif query.data.startswith("show_option"):
         ident, from_user = query.data.split("#")
         btn = [[
-            InlineKeyboardButton("⚠️ ᴜɴᴀᴠᴀɪʟᴀʙʟᴇ ⚠️",
-                                 callback_data=f"unavailable#{from_user}"),
+            _ikb("⚠️ ᴜɴᴀᴠᴀɪʟᴀʙʟᴇ ⚠️",
+                                 callback_data=f"unavailable#{from_user}", style="danger"),
             InlineKeyboardButton(
                 "🟢 ᴜᴘʟᴏᴀᴅᴇᴅ 🟢", callback_data=f"uploaded#{from_user}")
         ], [
-            InlineKeyboardButton("♻️ ᴀʟʀᴇᴀᴅʏ ᴀᴠᴀɪʟᴀʙʟᴇ ♻️",
-                                 callback_data=f"already_available#{from_user}")
+            _ikb("♻️ ᴀʟʀᴇᴀᴅʏ ᴀᴠᴀɪʟᴀʙʟᴇ ♻️",
+                                 callback_data=f"already_available#{from_user}", style="success")
         ], [
-            InlineKeyboardButton("📌 Not Released 📌",
-                                 callback_data=f"Not_Released#{from_user}"),
-            InlineKeyboardButton("♨️Type Correct Spelling♨️",
-                                 callback_data=f"Type_Correct_Spelling#{from_user}")
+            _ikb("📌 Not Released 📌",
+                                 callback_data=f"Not_Released#{from_user}", style="danger"),
+            _ikb("♨️Type Correct Spelling♨️",
+                                 callback_data=f"Type_Correct_Spelling#{from_user}", style="primary")
         ], [
-            InlineKeyboardButton("⚜️ Not Available In The Hindi ⚜️",
-                                 callback_data=f"Not_Available_In_The_Hindi#{from_user}")
+            _ikb("⚜️ Not Available In The Hindi ⚜️",
+                                 callback_data=f"Not_Available_In_The_Hindi#{from_user}", style="danger")
         ]]
         btn2 = [[
             InlineKeyboardButton("ᴠɪᴇᴡ ꜱᴛᴀᴛᴜꜱ", url=f"{query.message.link}")
@@ -2024,7 +2017,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
                                   callback_data=f"unalert#{from_user}")]
         ]
         btn2 = [
-            [InlineKeyboardButton('ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ', url=link.invite_link),
+            [_ikb('ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ', url=link.invite_link, style="success"),
              InlineKeyboardButton("ᴠɪᴇᴡ ꜱᴛᴀᴛᴜꜱ", url=f"{query.message.link}")]
         ]
         if query.from_user.id in ADMINS:
@@ -2091,8 +2084,8 @@ async def cb_handler(client: Client, query: CallbackQuery):
     elif query.data.startswith("Type_Correct_Spelling"):
         ident, from_user = query.data.split("#")
         btn = [[
-            InlineKeyboardButton("♨️ Type Correct Spelling ♨️",
-                                 callback_data=f"wsalert#{from_user}")
+            _ikb("♨️ Type Correct Spelling ♨️",
+                                 callback_data=f"wsalert#{from_user}", style="primary")
         ]]
         btn2 = [[
             InlineKeyboardButton('ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ', url=link.invite_link),
@@ -2182,12 +2175,12 @@ async def cb_handler(client: Client, query: CallbackQuery):
         deep_payload = re.sub(r'[^A-Za-z0-9]+', '-', movie_name).strip('-')
         getfile_link = f"https://t.me/{temp.U_NAME}?start=getfile-{deep_payload}"
         btn2 = [[
-            InlineKeyboardButton("📥 ɢᴇᴛ ꜰɪʟᴇ ɪɴ ᴘᴍ 📥", url=getfile_link)
+            _ikb("📥 ɢᴇᴛ ꜰɪʟᴇ ɪɴ ᴘᴍ 📥", url=getfile_link, style="success")
         ], [
             InlineKeyboardButton('ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ', url=link.invite_link),
             InlineKeyboardButton("ᴠɪᴇᴡ ꜱᴛᴀᴛᴜꜱ", url=f"{query.message.link}")
         ], [
-            InlineKeyboardButton("🔍 ꜱᴇᴀʀᴄʜ ʜᴇʀᴇ 🔎", url=GRP_LNK)
+            _ikb("🔍 ꜱᴇᴀʀᴄʜ ʜᴇʀᴇ 🔎", url=GRP_LNK, style="success")
         ]]
         if query.from_user.id in ADMINS:
             user = await client.get_users(from_user)
@@ -2355,17 +2348,17 @@ async def cb_handler(client: Client, query: CallbackQuery):
                 text=f"•• ʟɪɴᴋ ɢᴇɴᴇʀᴀᴛᴇᴅ ꜰᴏʀ ɪᴅ #{user_id} \n•• ᴜꜱᴇʀɴᴀᴍᴇ : {username} \n\n•• ᖴᎥᒪᗴ Nᗩᗰᗴ : {fileName}",
                 quote=True,
                 disable_web_page_preview=True,
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Fast Download 🚀", url=dreamx_download),  # we download Link
-                                                    InlineKeyboardButton('🖥️ Watch online 🖥️', url=dreamx_stream)]])  # web stream Link
+                reply_markup=InlineKeyboardMarkup([[_ikb("🚀 Fast Download 🚀", url=dreamx_download, style="success"),  # we download Link
+                                                    _ikb('🖥️ Watch online 🖥️', url=dreamx_stream, style="success")]])  # web stream Link
             )
             dreamcinezone = await query.edit_message_reply_markup(
                 reply_markup=InlineKeyboardMarkup([
                     [
-                        InlineKeyboardButton("🚀 Download ", url=dreamx_download),
-                        InlineKeyboardButton('🖥️ Watch ', url=dreamx_stream)
+                        _ikb("🚀 Download ", url=dreamx_download, style="success"),
+                        _ikb('🖥️ Watch ', url=dreamx_stream, style="success")
                     ],
                     [
-                        InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)
+                        _ikb('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK, style="success")
                     ]
                 ])
             )
@@ -2385,7 +2378,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
             photo="https://i.ibb.co/whf8xF7j/photo-2025-07-26-10-42-46-7531339305176793100.jpg",
             caption=script.PRE_STREAM,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🚀 Buy Premium 🚀", callback_data="premium_info")]
+                [_ikb("🚀 Buy Premium 🚀", callback_data="premium_info", style="primary")]
             ])
         )
         await asyncio.sleep(DELETE_TIME)
@@ -2404,9 +2397,9 @@ async def cb_handler(client: Client, query: CallbackQuery):
 
     elif query.data == "donation":
         buttons = [[
-                InlineKeyboardButton('🌲 Sᴇɴᴅ Dᴏɴᴀᴛᴇ Sᴄʀᴇᴇɴsʜᴏᴛ Hᴇʀᴇ', url=OWNER_LNK)
+                _ikb('🌲 Sᴇɴᴅ Dᴏɴᴀᴛᴇ Sᴄʀᴇᴇɴsʜᴏᴛ Hᴇʀᴇ', url=OWNER_LNK, style="success")
             ],[
-                InlineKeyboardButton('⇍ ʙᴀᴄᴋ ⇏', callback_data='about')
+                _ikb('⇍ ʙᴀᴄᴋ ⇏', callback_data='about', style="primary")
             ]]
         reply_markup = InlineKeyboardMarkup(buttons)
         await query.message.edit_text(text="● ◌ ◌")
@@ -2469,8 +2462,8 @@ async def cb_handler(client: Client, query: CallbackQuery):
 
     elif query.data == "source":
         buttons = [[
-            InlineKeyboardButton('Owner', url=OWNER_LNK),
-            InlineKeyboardButton('⇋ ʙᴀᴄᴋ ⇋', callback_data='about')
+            _ikb('Owner', url=OWNER_LNK, style="primary"),
+            _ikb('⇋ ʙᴀᴄᴋ ⇋', callback_data='about', style="primary")
         ]]
         reply_markup = InlineKeyboardMarkup(buttons)
         await query.message.edit_text(
@@ -2509,8 +2502,8 @@ async def cb_handler(client: Client, query: CallbackQuery):
     elif query.data == "buy_info":
         try:
             btn = [[
-                InlineKeyboardButton('⭐ Telegram Stars', callback_data='star_info'),
-                InlineKeyboardButton('💳 UPI', callback_data='upi_info')
+                _ikb('⭐ Telegram Stars', callback_data='star_info', style="primary"),
+                _ikb('💳 UPI', callback_data='upi_info', style="primary")
             ],[
                 InlineKeyboardButton('⬅️ Back', callback_data='premium_info'),
                 InlineKeyboardButton('🏠 Home', callback_data='ui_home')
@@ -2528,7 +2521,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
     elif query.data == "upi_info":
         try:
             btn = [[
-                InlineKeyboardButton('📲 Send Payment Screenshot', url=OWNER_LNK),
+                _ikb('📲 Send Payment Screenshot', url=OWNER_LNK, style="primary"),
             ],[
                 InlineKeyboardButton('⬅️ Back', callback_data='buy_info'),
                 InlineKeyboardButton('🏠 Home', callback_data='ui_home')
@@ -2552,7 +2545,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
             ]
             buttons = [btn[i:i + 2] for i in range(0, len(btn), 2)]
             buttons.append([
-                InlineKeyboardButton("⬅️ Back", callback_data="buy_info"),
+                _ikb("⬅️ Back", callback_data="buy_info", style="primary"),
                 InlineKeyboardButton("🏠 Home", callback_data="ui_home"),
             ])
             reply_markup = InlineKeyboardMarkup(buttons)

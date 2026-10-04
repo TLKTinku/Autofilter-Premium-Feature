@@ -8,6 +8,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMedi
 
 from database.users_chats_db import db
 from info import UPDATE_CHNL_LNK, GRP_LNK, PICS
+from utils import ikb
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MY MOVIES PRO — one shared design language for every screen.
@@ -55,18 +56,18 @@ def _support_url():
 # ── Keyboards ────────────────────────────────────────────────────────────────
 def home_kb():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔎 Search Movies", callback_data="ui_search")],
+        [ikb("🔎 Search Movies", callback_data="ui_search", style="primary")],
         [
-            InlineKeyboardButton("🎬 Trending", callback_data="topsearch"),
-            InlineKeyboardButton("💎 Premium", callback_data="premium_info"),
+            ikb("🎬 Trending", callback_data="topsearch", style="primary"),
+            ikb("💎 Premium", callback_data="premium_info", style="primary"),
         ],
         [
-            InlineKeyboardButton("👤 My Account", callback_data="ui_account"),
-            InlineKeyboardButton("⚙️ Settings", callback_data="ui_settings"),
+            ikb("👤 My Account", callback_data="ui_account", style="primary"),
+            ikb("⚙️ Settings", callback_data="ui_settings", style="primary"),
         ],
         [
-            InlineKeyboardButton("❓ Help", callback_data="ui_help"),
-            InlineKeyboardButton("ℹ️ About", callback_data="ui_about"),
+            ikb("❓ Help", callback_data="ui_help", style="primary"),
+            ikb("ℹ️ About", callback_data="ui_about", style="primary"),
         ],
     ])
 
@@ -76,11 +77,11 @@ def nav_kb(*rows, back=None):
     out = list(rows)
     if back:
         out.append([
-            InlineKeyboardButton("⬅️ Back", callback_data=back),
-            InlineKeyboardButton("🏠 Home", callback_data="ui_home"),
+            ikb("⬅️ Back", callback_data=back, style="primary"),
+            ikb("🏠 Home", callback_data="ui_home", style="primary"),
         ])
     else:
-        out.append([InlineKeyboardButton("🏠 Home", callback_data="ui_home")])
+        out.append([ikb("🏠 Home", callback_data="ui_home", style="primary")])
     return InlineKeyboardMarkup(out)
 
 
@@ -117,12 +118,12 @@ def premium_overview_text():
 
 def premium_overview_kb():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💎 Activate Premium", callback_data="buy_info")],
+        [ikb("💎 Activate Premium", callback_data="buy_info", style="primary")],
         [
-            InlineKeyboardButton("🎁 Refer & Earn", callback_data="reffff"),
-            InlineKeyboardButton("🆓 Free Trial", callback_data="give_trial"),
+            ikb("🎁 Refer & Earn", callback_data="reffff", style="primary"),
+            ikb("🆓 Free Trial", callback_data="give_trial", style="success"),
         ],
-        [InlineKeyboardButton("🏠 Home", callback_data="ui_home")],
+        [ikb("🏠 Home", callback_data="ui_home", style="primary")],
     ])
 
 
@@ -249,11 +250,11 @@ async def ui_help(_, query):
         f"{LINE}",
         nav_kb(
             [
-                InlineKeyboardButton("🔎 Search Guide", callback_data="ui_h_search"),
-                InlineKeyboardButton("📨 Request Guide", callback_data="ui_request"),
+                ikb("🔎 Search Guide", callback_data="ui_h_search", style="primary"),
+                ikb("📨 Request Guide", callback_data="ui_request", style="primary"),
             ],
-            [InlineKeyboardButton("💎 Premium Help", callback_data="premium_info")],
-            [InlineKeyboardButton("🛠️ Support", url=_support_url())],
+            [ikb("💎 Premium Help", callback_data="premium_info", style="primary")],
+            [ikb("🛠️ Support", url=_support_url(), style="primary")],
         ),
     )
 
@@ -287,7 +288,7 @@ async def ui_account(_, query):
     await _edit(
         query,
         account_text(u.mention, u.id, info),
-        nav_kb([InlineKeyboardButton(upgrade_label, callback_data="premium_info")]),
+        nav_kb([ikb(upgrade_label, callback_data="premium_info", style="primary")]),
     )
 
 
@@ -323,8 +324,8 @@ async def ui_settings(_, query):
         f"{LINE}",
         nav_kb(
             [
-                InlineKeyboardButton("👤 My Account", callback_data="ui_account"),
-                InlineKeyboardButton("💎 Premium", callback_data="premium_info"),
+                ikb("👤 My Account", callback_data="ui_account", style="primary"),
+                ikb("💎 Premium", callback_data="premium_info", style="primary"),
             ],
         ),
     )
@@ -335,9 +336,9 @@ async def ui_about(_, query):
     rows = []
     links = []
     if UPDATE_CHNL_LNK:
-        links.append(InlineKeyboardButton("🆕 Latest Updates", url=UPDATE_CHNL_LNK))
+        links.append(ikb("🆕 Latest Updates", url=UPDATE_CHNL_LNK, style="primary"))
     if GRP_LNK:
-        links.append(InlineKeyboardButton("💬 Community", url=GRP_LNK))
+        links.append(ikb("💬 Community", url=GRP_LNK, style="primary"))
     if links:
         rows.append(links)
     await _edit(

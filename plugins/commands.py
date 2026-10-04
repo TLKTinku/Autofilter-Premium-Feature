@@ -18,7 +18,7 @@ from pyrogram.errors import FloodWait, ChatAdminRequired, UserNotParticipant
 from database.ia_filterdb import Media, Media2, get_file_details, unpack_new_file_id, get_bad_files
 from database.users_chats_db import db
 from info import *
-from utils import get_settings, save_group_settings, is_subscribed, is_req_subscribed, get_size, get_shortlink, is_check_admin, temp, get_readable_time, get_time, generate_settings_text, log_error, clean_filename, format_file_caption, strip_channel_tags
+from utils import get_settings, save_group_settings, is_subscribed, is_req_subscribed, get_size, get_shortlink, is_check_admin, temp, get_readable_time, get_time, generate_settings_text, log_error, clean_filename, format_file_caption, strip_channel_tags, ikb
 import time
 
 
@@ -68,7 +68,7 @@ async def start(client, message):
             verifiedfiles = f"https://telegram.me/{temp.U_NAME}?start=file_{grp_id}_{file_id}"
         await client.send_message(settings['log'], script.VERIFIED_LOG_TEXT.format(m.from_user.mention, user_id, datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%d %B %Y'), num))
         btn = [[
-            InlineKeyboardButton("✅ ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ɢᴇᴛ ꜰɪʟᴇ ✅", url=verifiedfiles),
+            ikb("✅ ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ɢᴇᴛ ꜰɪʟᴇ ✅", url=verifiedfiles, style="success"),
         ]]
         reply_markup=InlineKeyboardMarkup(btn)
         dlt=await m.reply_photo(
@@ -82,9 +82,9 @@ async def start(client, message):
         return         
     if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         buttons = [[
-                    InlineKeyboardButton('Add to Group', url=f'http://t.me/{temp.U_NAME}?startgroup=true')
+                    ikb('Add to Group', url=f'http://t.me/{temp.U_NAME}?startgroup=true', style="success")
                 ],[
-                    InlineKeyboardButton('Updates', url=UPDATE_CHNL_LNK)
+                    ikb('Updates', url=UPDATE_CHNL_LNK, style="primary")
                   ]]
         reply_markup = InlineKeyboardMarkup(buttons)
         await message.reply(script.GSTART_TXT.format(message.from_user.mention if message.from_user else message.chat.title, temp.U_NAME, temp.B_NAME), reply_markup=reply_markup, disable_web_page_preview=True)
@@ -190,9 +190,9 @@ async def start(client, message):
         
     if len(message.command) == 2 and message.command[1] in ["premium"]:
         buttons = [[
-                    InlineKeyboardButton('📲 Send Payment Screenshot', url=OWNER_LNK)
+                    ikb('📲 Send Payment Screenshot', url=OWNER_LNK, style="primary")
                   ],[
-                    InlineKeyboardButton('❌ Close', callback_data='close_data')
+                    ikb('❌ Close', callback_data='close_data', style="danger")
                   ]]
         reply_markup = InlineKeyboardMarkup(buttons)
         await message.reply_photo(
@@ -235,7 +235,7 @@ async def start(client, message):
                 if len(message.command) > 1 and "_" in message.command[1]:
                     kk, file_id = message.command[1].split("_", 1)
                     btn.append([
-                        InlineKeyboardButton("♻️ ᴛʀʏ ᴀɢᴀɪɴ ♻️", callback_data=f"checksub#{kk}#{file_id}")
+                        ikb("♻️ ᴛʀʏ ᴀɢᴀɪɴ ♻️", callback_data=f"checksub#{kk}#{file_id}", style="primary")
                     ])
                     reply_markup = InlineKeyboardMarkup(btn)
                 photo = random.choice(FSUB_PICS) if FSUB_PICS else "https://graph.org/file/7478ff3eac37f4329c3d8.jpg"
@@ -342,8 +342,8 @@ async def start(client, message):
                 if STREAM_MODE and not PREMIUM_STREAM_MODE:
                     
                     btn = [
-                        [InlineKeyboardButton('🚀 ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ / ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}')],
-                        [InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]  # Keep this line unchanged  
+                        [ikb('🚀 ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ / ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}', style="success")],
+                        [ikb('Updates Channel', url=UPDATE_CHNL_LNK, style="primary")]  # Keep this line unchanged  
                     ]
                 elif STREAM_MODE and PREMIUM_STREAM_MODE:
                     
@@ -593,9 +593,9 @@ async def settings(client, message):
             return await message.reply_text(script.NT_ADMIN_ALRT_TXT)
         await db.connect_group(grp_id, user_id)
         btn = [[
-                InlineKeyboardButton("👤 ᴏᴘᴇɴ ɪɴ ᴘʀɪᴠᴀᴛᴇ ᴄʜᴀᴛ 👤", callback_data=f"opnsetpm#{grp_id}")
+                ikb("👤 ᴏᴘᴇɴ ɪɴ ᴘʀɪᴠᴀᴛᴇ ᴄʜᴀᴛ 👤", callback_data=f"opnsetpm#{grp_id}", style="success")
               ],[
-                InlineKeyboardButton("👥 ᴏᴘᴇɴ ʜᴇʀᴇ 👥", callback_data=f"opnsetgrp#{grp_id}")
+                ikb("👥 ᴏᴘᴇɴ ʜᴇʀᴇ 👥", callback_data=f"opnsetgrp#{grp_id}", style="success")
               ]]
         await message.reply_text(
                 text="<b>ᴡʜᴇʀᴇ ᴅᴏ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴏᴘᴇɴ ꜱᴇᴛᴛɪɴɢꜱ ᴍᴇɴᴜ ? ⚙️</b>",
@@ -682,8 +682,8 @@ async def requests(bot, message):
         try:
             if REQST_CHANNEL is not None:
                 btn = [[
-                        InlineKeyboardButton('ᴠɪᴇᴡ ʀᴇǫᴜᴇꜱᴛ', url=f"{message.reply_to_message.link}"),
-                        InlineKeyboardButton('ꜱʜᴏᴡ ᴏᴘᴛɪᴏɴꜱ', callback_data=f'show_option#{reporter}')
+                        ikb('ᴠɪᴇᴡ ʀᴇǫᴜᴇꜱᴛ', url=f"{message.reply_to_message.link}", style="primary"),
+                        ikb('ꜱʜᴏᴡ ᴏᴘᴛɪᴏɴꜱ', callback_data=f'show_option#{reporter}', style="primary")
                       ]]
                 reported_post = await bot.send_message(chat_id=REQST_CHANNEL, text=f"<b>📝 ʀᴇǫᴜᴇꜱᴛ : <u>{content}</u>\n\n📚 ʀᴇᴘᴏʀᴛᴇᴅ ʙʏ : {mention}\n📖 ʀᴇᴘᴏʀᴛᴇʀ ɪᴅ : {reporter}\n\n</b>", reply_markup=InlineKeyboardMarkup(btn))
                 success = True
@@ -783,7 +783,7 @@ async def requests(bot, message):
         #chat = int(chat)'''
         link = await bot.create_chat_invite_link(int(REQST_CHANNEL))
         btn = [[
-                InlineKeyboardButton('ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ', url=link.invite_link),
+                ikb('ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ', url=link.invite_link, style="success"),
                 InlineKeyboardButton('ᴠɪᴇᴡ ʀᴇǫᴜᴇꜱᴛ', url=f"{reported_post.link}")
               ]]
         await message.reply_text("<b>ʏᴏᴜʀ ʀᴇǫᴜᴇꜱᴛ ʜᴀꜱ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ! ᴘʟᴇᴀꜱᴇ ᴡᴀɪᴛ ꜰᴏʀ ꜱᴏᴍᴇ ᴛɪᴍᴇ.\n\nᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ & ᴠɪᴇᴡ ʀᴇǫᴜᴇꜱᴛ.</b>", reply_markup=InlineKeyboardMarkup(btn))
@@ -835,9 +835,9 @@ async def deletemultiplefiles(bot, message):
         return
     await k.delete()
     btn = [[
-       InlineKeyboardButton("⚠️ Yes, Continue ! ⚠️", callback_data=f"killfilesdq#{keyword}")
+       ikb("⚠️ Yes, Continue ! ⚠️", callback_data=f"killfilesdq#{keyword}", style="success")
        ],[
-       InlineKeyboardButton("❌ No, Abort operation ! ❌", callback_data="close_data")
+       ikb("❌ No, Abort operation ! ❌", callback_data="close_data", style="danger")
     ]]
     await message.reply_text(
         text=f"<b>Found {total} files for your query {keyword} !\n\nDo you want to delete?</b>",
@@ -1001,8 +1001,8 @@ async def stop_button(bot, message):
 @Client.on_message(filters.command("del_msg") & filters.user(ADMINS))
 async def del_msg(client, message):
     confirm_markup = InlineKeyboardMarkup([[
-        InlineKeyboardButton("Yes", callback_data="confirm_del_yes"),
-        InlineKeyboardButton("No", callback_data="confirm_del_no")
+        ikb("Yes", callback_data="confirm_del_yes", style="success"),
+        ikb("No", callback_data="confirm_del_no", style="danger")
     ]])
     sent_message = await message.reply_text(
         "⚠️ Aʀᴇ ʏᴏᴜ sᴜʀᴇ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴄʟᴇᴀʀ ᴛʜᴇ ᴜᴘᴅᴀᴛᴇs ᴄʜᴀɴɴᴇʟ ʟɪsᴛ ?\n\n ᴅᴏ ʏᴏᴜ ꜱᴛɪʟʟ ᴡᴀɴᴛ ᴛᴏ ᴄᴏɴᴛɪɴᴜᴇ ?",
@@ -1229,8 +1229,8 @@ async def all_settings(client, message):
         return await message.reply_text(f"<b>⚠️ ᴇʀʀᴏʀ ꜰᴇᴛᴄʜɪɴɢ ꜱᴇᴛᴛɪɴɢꜱ:</b>\n<code>{e}</code>")
     text = generate_settings_text(settings, title)
     btn = [
-        [InlineKeyboardButton("♻️ ʀᴇꜱᴇᴛ ꜱᴇᴛᴛɪɴɢꜱ", callback_data=f"reset_group_{grp_id}")],
-        [InlineKeyboardButton("🚫 ᴄʟᴏꜱᴇ", callback_data="close_data")]
+        [ikb("♻️ ʀᴇꜱᴇᴛ ꜱᴇᴛᴛɪɴɢꜱ", callback_data=f"reset_group_{grp_id}", style="primary")],
+        [ikb("🚫 ᴄʟᴏꜱᴇ", callback_data="close_data", style="danger")]
     ]
     dlt = await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn), disable_web_page_preview=True)
     await asyncio.sleep(300)
