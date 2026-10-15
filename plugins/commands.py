@@ -26,6 +26,61 @@ import time
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
+
+async def branded_thumb(client, file_id):
+    """Real cover + Official MY MOVIES. Temp file only, no Mongo."""
+    if not file_id:
+        return CUSTOM_THUMB
+    tmp = None
+    out = None
+    msg = None
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        msg = await client.send_cached_media(chat_id=BIN_CHANNEL, file_id=file_id)
+        media = msg.video or msg.document or msg.audio
+        thumbs = getattr(media, "thumbs", None) if media else None
+        if not thumbs:
+            return CUSTOM_THUMB
+        tmp = await client.download_media(thumbs[0].file_id, file_name=f"/tmp/th_{abs(hash(file_id))}.jpg")
+        im = Image.open(tmp).convert("RGB")
+        w, h = im.size
+        bar = max(28, h // 8)
+        draw = ImageDraw.Draw(im)
+        draw.rectangle([0, h - bar, w, h], fill=(0, 0, 0))
+        text = "OFFICIAL MY MOVIES"
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", max(14, bar - 10))
+        except Exception:
+            font = ImageFont.load_default()
+        tw = draw.textlength(text, font=font)
+        draw.text(((w - tw) / 2, h - bar + 4), text, fill=(255, 215, 0), font=font)
+        out = tmp + ".brand.jpg"
+        im.save(out, "JPEG", quality=75)
+        im.close()
+        # drop older brand thumbs
+        try:
+            import glob
+            for f in glob.glob("/tmp/th_*.brand.jpg"):
+                if f != out:
+                    os.remove(f)
+        except Exception:
+            pass
+        return out
+    except Exception as e:
+        logger.error("branded_thumb: %s", e)
+        return CUSTOM_THUMB
+    finally:
+        try:
+            if msg:
+                await msg.delete()
+        except Exception:
+            pass
+        try:
+            if tmp and os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+
 TIMEZONE = "Asia/Kolkata"
 BATCH_FILES = {}
 
@@ -365,6 +420,7 @@ async def start(client, message):
                     chat_id=message.from_user.id,
                     file_id=file_id,
                     caption=f_caption,
+                    thumb=await branded_thumb(client, file_id),
                     protect_content=settings.get('file_secure', PROTECT_CONTENT),
                     reply_markup=InlineKeyboardMarkup(btn)
                 )
@@ -406,6 +462,7 @@ async def start(client, message):
             msg = await client.send_cached_media(
                 chat_id=message.from_user.id,
                 file_id=file_id,
+                thumb=await branded_thumb(client, file_id),
                 protect_content=settings.get('file_secure', PROTECT_CONTENT),
                 reply_markup=InlineKeyboardMarkup(btn))
 
@@ -475,6 +532,7 @@ async def start(client, message):
         chat_id=message.from_user.id,
         file_id=file_id,
         caption=f_caption,
+        thumb=await branded_thumb(client, file_id),
         protect_content=settings.get('file_secure', PROTECT_CONTENT),
         reply_markup=InlineKeyboardMarkup(btn)
     )
@@ -485,6 +543,14 @@ async def start(client, message):
     await msg.delete()
     await k.edit_text("<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!</b>")
     return
+
+
+@Client.on_message(filters.command("setthumb") & filters.user(ADMINS))
+async def setthumb_cmd(client, message):
+    reply = message.reply_to_message
+    if not reply or not reply.photo:
+        return await message.reply("Photo pe reply karke /setthumb bhejo. Jo ID aaye woh CUSTOM_THUMB mein daalna.")
+    await message.reply(f"<code>{reply.photo.file_id}</code>\n\nRender env:\n<code>CUSTOM_THUMB={reply.photo.file_id}</code>")
 
 @Client.on_message(filters.command('logs') & filters.user(ADMINS))
 async def log_file(bot, message):
