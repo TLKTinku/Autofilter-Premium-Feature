@@ -6,7 +6,7 @@ from collections import defaultdict
 from plugins.Dreamxfutures.Imdbposter import get_movie_detailsx, fetch_image, get_movie_details
 from database.users_chats_db import db
 from pyrogram import Client, filters, enums
-from info import CHANNELS, MOVIE_UPDATE_CHANNEL, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER
+from info import CHANNELS, MOVIE_UPDATE_CHANNEL, MOVIE_UPDATE_GROUP, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER
 from Script import script
 from database.ia_filterdb import save_file
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -307,6 +307,30 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
         movie_doc["files"].append(file_data)
         schedule_update(bot, base_name)
 
+
+async def _post_to_group(bot, base_name, text, buttons, photo=None):
+    if not MOVIE_UPDATE_GROUP:
+        return
+    try:
+        movie_doc = await db.movie_updates.find_one({"_id": base_name}) or {}
+        gid = movie_doc.get("group_message_id")
+        if gid:
+            try:
+                if photo:
+                    await bot.edit_message_caption(MOVIE_UPDATE_GROUP, gid, caption=text, reply_markup=buttons, parse_mode=enums.ParseMode.HTML)
+                else:
+                    await bot.edit_message_text(MOVIE_UPDATE_GROUP, gid, text, reply_markup=buttons, parse_mode=enums.ParseMode.HTML)
+                return
+            except Exception:
+                pass
+        if photo:
+            msg = await bot.send_photo(MOVIE_UPDATE_GROUP, photo, caption=text, reply_markup=buttons, parse_mode=enums.ParseMode.HTML)
+        else:
+            msg = await bot.send_message(MOVIE_UPDATE_GROUP, text, reply_markup=buttons, parse_mode=enums.ParseMode.HTML)
+        await db.movie_updates.update_one({"_id": base_name}, {"$set": {"group_message_id": msg.id}})
+    except Exception as e:
+        logger.error("Group update failed: %s", e)
+
 async def send_movie_update(bot, base_name):
     max_retries = 3
     base_delay = 5
@@ -317,6 +341,7 @@ async def send_movie_update(bot, base_name):
                 return None
 
             text = generate_movie_message(movie_doc, base_name)
+            resized_poster = None
             buttons = InlineKeyboardMarkup([[
                 InlineKeyboardButton(
                     'ɢᴇᴛ ғɪʟᴇs',
@@ -350,6 +375,7 @@ async def send_movie_update(bot, base_name):
                 {"_id": base_name},
                 {"$set": {"message_id": msg.id, "is_photo": is_photo}}
             )
+            await _post_to_group(bot, base_name, text, buttons, photo=resized_poster if is_photo else None)
             return msg
         except FloodWait as e:
             wait_time = e.value + 2
@@ -399,6 +425,7 @@ async def update_movie_message(bot, base_name):
                     invert_media=ABOVE_PREVIEW,
                     disable_web_page_preview=not LINK_PREVIEW
                 )
+            await _post_to_group(bot, base_name, text, buttons)
             return
         except (MessageIdInvalid, MessageNotModified):
             pass
