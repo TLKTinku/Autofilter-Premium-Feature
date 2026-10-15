@@ -416,9 +416,9 @@ async def start(client, message):
                         ]
                 else:
                     btn = [[InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]]
-                msg = await client.send_cached_media(
+                msg = await client.send_document(
                     chat_id=message.from_user.id,
-                    file_id=file_id,
+                    document=file_id,
                     caption=f_caption,
                     thumb=await branded_thumb(client, file_id),
                     protect_content=settings.get('file_secure', PROTECT_CONTENT),
@@ -459,9 +459,9 @@ async def start(client, message):
             else:
             
                 btn = [[InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]] 
-            msg = await client.send_cached_media(
+            msg = await client.send_document(
                 chat_id=message.from_user.id,
-                file_id=file_id,
+                document=file_id,
                 thumb=await branded_thumb(client, file_id),
                 protect_content=settings.get('file_secure', PROTECT_CONTENT),
                 reply_markup=InlineKeyboardMarkup(btn))
@@ -528,9 +528,9 @@ async def start(client, message):
             ]
     else:
         btn = [[InlineKeyboardButton('Updates Channel', url=UPDATE_CHNL_LNK)]]
-    msg = await client.send_cached_media(
+    msg = await client.send_document(
         chat_id=message.from_user.id,
-        file_id=file_id,
+        document=file_id,
         caption=f_caption,
         thumb=await branded_thumb(client, file_id),
         protect_content=settings.get('file_secure', PROTECT_CONTENT),

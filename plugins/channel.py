@@ -349,31 +349,41 @@ async def send_movie_update(bot, base_name):
                 )
             ]])
 
-            if movie_doc.get("poster_url") and not LINK_PREVIEW:
-                resized_poster = await fetch_image(movie_doc["poster_url"], size=(2560, 1440) if LANDSCAPE_POSTER and TMDB_POSTER and not error_tmdb else (853, 1280))
-                msg = await bot.send_photo(
-                    chat_id=MOVIE_UPDATE_CHANNEL,
-                    photo=resized_poster,
-                    caption=text,
-                    reply_markup=buttons,
-                    parse_mode=enums.ParseMode.HTML
-                )
-                is_photo = True
-            else:
-                send_params = {
-                    "chat_id": MOVIE_UPDATE_CHANNEL,
-                    "text": text,
-                    "reply_markup": buttons,
-                    "parse_mode": enums.ParseMode.HTML
-                }
-                if movie_doc.get("poster_url") and LINK_PREVIEW:
-                    send_params["invert_media"] = ABOVE_PREVIEW
-                msg = await bot.send_message(**send_params)
-                is_photo = False
+            ids = MOVIE_UPDATE_CHANNEL if isinstance(MOVIE_UPDATE_CHANNEL, list) else [MOVIE_UPDATE_CHANNEL]
+            msg = None
+            msg_ids = {}
+            is_photo = False
+            for cid in ids:
+                try:
+                    if movie_doc.get("poster_url") and not LINK_PREVIEW:
+                        resized_poster = await fetch_image(movie_doc["poster_url"], size=(2560, 1440) if LANDSCAPE_POSTER and TMDB_POSTER and not error_tmdb else (853, 1280))
+                        msg = await bot.send_photo(
+                            chat_id=cid,
+                            photo=resized_poster,
+                            caption=text,
+                            reply_markup=buttons,
+                            parse_mode=enums.ParseMode.HTML
+                        )
+                        is_photo = True
+                    else:
+                        send_params = {
+                            "chat_id": cid,
+                            "text": text,
+                            "reply_markup": buttons,
+                            "parse_mode": enums.ParseMode.HTML
+                        }
+                        if movie_doc.get("poster_url") and LINK_PREVIEW:
+                            send_params["invert_media"] = ABOVE_PREVIEW
+                        msg = await bot.send_message(**send_params)
+                        is_photo = False
+                    if msg:
+                        msg_ids[str(cid)] = msg.id
+                except Exception as e:
+                    logger.error("Update post failed for %s: %s", cid, e)
 
             await db.movie_updates.update_one(
                 {"_id": base_name},
-                {"$set": {"message_id": msg.id, "is_photo": is_photo}}
+                {"$set": {"message_id": msg.id if msg else None, "message_ids": msg_ids, "is_photo": is_photo}}
             )
             await _post_to_group(bot, base_name, text, buttons, photo=resized_poster if is_photo else None)
             return msg
@@ -399,45 +409,52 @@ async def update_movie_message(bot, base_name):
             )
         ]])
 
+        msg_ids = movie_doc.get("message_ids") or {}
         message_id = movie_doc.get("message_id")
         is_photo = movie_doc.get("is_photo", False)
+        ids = MOVIE_UPDATE_CHANNEL if isinstance(MOVIE_UPDATE_CHANNEL, list) else [MOVIE_UPDATE_CHANNEL]
 
-        if not message_id:
+        if not message_id and not msg_ids:
             await send_movie_update(bot, base_name)
             return
 
         try:
-            if is_photo:
-                await bot.edit_message_caption(
-                    chat_id=MOVIE_UPDATE_CHANNEL,
-                    message_id=message_id,
-                    caption=text,
-                    reply_markup=buttons,
-                    parse_mode=enums.ParseMode.HTML
-                )
-            else:
-                await bot.edit_message_text(
-                    chat_id=MOVIE_UPDATE_CHANNEL,
-                    message_id=message_id,
-                    text=text,
-                    reply_markup=buttons,
-                    parse_mode=enums.ParseMode.HTML,
-                    invert_media=ABOVE_PREVIEW,
-                    disable_web_page_preview=not LINK_PREVIEW
-                )
+            for cid in ids:
+                mid = msg_ids.get(str(cid)) or message_id
+                if not mid:
+                    continue
+                if is_photo:
+                    await bot.edit_message_caption(
+                        chat_id=cid,
+                        message_id=mid,
+                        caption=text,
+                        reply_markup=buttons,
+                        parse_mode=enums.ParseMode.HTML
+                    )
+                else:
+                    await bot.edit_message_text(
+                        chat_id=cid,
+                        message_id=mid,
+                        text=text,
+                        reply_markup=buttons,
+                        parse_mode=enums.ParseMode.HTML,
+                        invert_media=ABOVE_PREVIEW,
+                        disable_web_page_preview=not LINK_PREVIEW
+                    )
             await _post_to_group(bot, base_name, text, buttons)
             return
         except (MessageIdInvalid, MessageNotModified):
             pass
         except Exception:
             try:
-                await bot.delete_messages(
-                    chat_id=MOVIE_UPDATE_CHANNEL,
-                    message_ids=message_id
-                )
+                ids = MOVIE_UPDATE_CHANNEL if isinstance(MOVIE_UPDATE_CHANNEL, list) else [MOVIE_UPDATE_CHANNEL]
+                for cid in ids:
+                    mid = (movie_doc.get("message_ids") or {}).get(str(cid)) or message_id
+                    if mid:
+                        await bot.delete_messages(chat_id=cid, message_ids=mid)
                 await db.movie_updates.update_one(
                     {"_id": base_name},
-                    {"$set": {"message_id": None, "is_photo": False}}
+                    {"$set": {"message_id": None, "message_ids": {}, "is_photo": False}}
                 )
             except Exception:
                 pass
