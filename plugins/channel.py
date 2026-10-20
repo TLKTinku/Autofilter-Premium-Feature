@@ -267,13 +267,15 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
             genres = ", ".join(g for g in genre_list if g in STANDARD_GENRES) or "N/A"
         else:
             genres = ", ".join(g for g in raw_genres if g in STANDARD_GENRES) or "N/A"
+        # Use IMDB poster/url by default. Only use TMDB fields if we fell back to TMDB
+        is_tmdb = bool(details.get("tmdb_url"))
         movie_doc = {
             "_id": base_name,
             "files": [file_data],
-            "poster_url": details.get("backdrop_url") if LANDSCAPE_POSTER and TMDB_POSTER and not error_tmdb else details.get("poster_url"),
+            "poster_url": details.get("poster_url") or details.get("backdrop_url"),
             "genres": genres,
             "rating": details.get("rating", "N/A"),
-            "imdb_url": details.get("url", "")if not TMDB_POSTER else details.get("tmdb_url"),
+            "imdb_url": details.get("url") or details.get("tmdb_url") or "",
             "year": media_info["year"] or details.get("year"),
             "tag": media_info["tag"],
             "ott_platform": media_info["ott_platform"],
@@ -354,7 +356,7 @@ async def send_movie_update(bot, base_name):
             for cid in ids:
                 try:
                     if movie_doc.get("poster_url") and not LINK_PREVIEW:
-                        resized_poster = await fetch_image(movie_doc["poster_url"], size=(2560, 1440) if LANDSCAPE_POSTER and TMDB_POSTER and not error_tmdb else (853, 1280))
+                        resized_poster = await fetch_image(movie_doc["poster_url"], size=(853, 1280))
                         msg = await bot.send_photo(
                             chat_id=cid,
                             photo=resized_poster,
