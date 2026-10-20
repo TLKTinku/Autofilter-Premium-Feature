@@ -380,6 +380,28 @@ async def get_posterx(query, bulk=False, id=False, file=None):
         'url': details.get('tmdb_url')
     }
     
+
+async def get_poster_fallback(query, bulk=False, id=False, file=None):
+    """Try IMDB first. If no poster found, fall back to TMDB."""
+    result = None
+    try:
+        result = await get_poster(query, bulk=bulk, id=id, file=file)
+        if result and result.get("poster"):
+            return result
+    except Exception as e:
+        logger.debug(f"IMDB poster failed: {e}")
+
+    # Fallback to TMDB only if API key exists and we still need a poster
+    if TMDB_API_KEY:
+        try:
+            tmdb_result = await get_posterx(query, bulk=bulk, id=id, file=file)
+            if tmdb_result and (tmdb_result.get("poster") or tmdb_result.get("backdrop")):
+                return tmdb_result
+        except Exception as e:
+            logger.debug(f"TMDB fallback failed: {e}")
+
+    return result  # Return IMDB result even if poster is missing, or None
+
 async def search_gagala(text):
     usr_agent = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -1111,7 +1133,7 @@ async def get_cap(settings, remaining_seconds, files, query, total_results, sear
                     )
             else:
                 if settings["imdb"]:
-                    imdb = await get_posterx(search, file=(files[0]).file_name) if TMDB_ON_SEARCH else await get_poster(search, file=(files[0]).file_name)
+                    imdb = await get_poster_fallback(search, file=(files[0]).file_name)
                 else:
                     imdb = None
                 if imdb:
