@@ -231,7 +231,6 @@ async def get_poster(query, bulk=False, id=False, file=None):
         query = (query.strip()).lower()
         title = query
         year = re.findall(r'[1-2]\d{3}$', query, re.IGNORECASE)
-        imdb
         if year:
             year = list_to_str(year[:1])
             title = (query.replace(year, "")).strip()
@@ -241,7 +240,11 @@ async def get_poster(query, bulk=False, id=False, file=None):
                 year = list_to_str(year[:1]) 
         else:
             year = None
-        movieid = imdb.search_movie(title.lower(), results=10)
+        try:
+            movieid = imdb.search_movie(title.lower(), results=10)
+        except Exception as e:
+            logger.warning(f"IMDB search failed: {e}")
+            return None
         if not movieid:
             return None
         if year:
@@ -382,25 +385,27 @@ async def get_posterx(query, bulk=False, id=False, file=None):
     
 
 async def get_poster_fallback(query, bulk=False, id=False, file=None):
-    """Try IMDB first. If no poster found, fall back to TMDB."""
+    """Try IMDB first. If no poster / error, fall back to TMDB."""
     result = None
     try:
         result = await get_poster(query, bulk=bulk, id=id, file=file)
         if result and result.get("poster"):
             return result
     except Exception as e:
-        logger.debug(f"IMDB poster failed: {e}")
+        logger.warning(f"IMDB poster failed for '{query}': {e}")
+        result = None
 
-    # Fallback to TMDB only if API key exists and we still need a poster
+    # Always try TMDB as fallback if we don't have a poster yet
     if TMDB_API_KEY:
         try:
             tmdb_result = await get_posterx(query, bulk=bulk, id=id, file=file)
             if tmdb_result and (tmdb_result.get("poster") or tmdb_result.get("backdrop")):
+                logger.info(f"Using TMDB fallback for '{query}'")
                 return tmdb_result
         except Exception as e:
-            logger.debug(f"TMDB fallback failed: {e}")
+            logger.warning(f"TMDB fallback also failed for '{query}': {e}")
 
-    return result  # Return IMDB result even if poster is missing, or None
+    return result
 
 async def search_gagala(text):
     usr_agent = {
