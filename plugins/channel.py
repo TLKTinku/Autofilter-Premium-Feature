@@ -6,7 +6,7 @@ from collections import defaultdict
 from plugins.Dreamxfutures.Imdbposter import get_movie_detailsx, fetch_image, get_movie_details
 from database.users_chats_db import db
 from pyrogram import Client, filters, enums
-from info import CHANNELS, MOVIE_UPDATE_CHANNEL, MOVIE_UPDATE_GROUP, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER
+from info import CHANNELS, MOVIE_UPDATE_CHANNEL, MOVIE_UPDATE_GROUP, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER, TMDB_API_KEY
 from Script import script
 from database.ia_filterdb import save_file
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -254,14 +254,12 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
     }
 
     if not movie_doc:
-        if TMDB_POSTER:
-            details = await get_movie_detailsx(base_name)
-            if details.get("error"):
-                error_tmdb=True
-                logger.info("TMDB error switching to IMDB")
-                details = await get_movie_details(base_name) or {}
-        else:
-            details = await get_movie_details(base_name) or {}
+        # Prefer IMDB first, fall back to TMDB if no poster
+        details = await get_movie_details(base_name) or {}
+        if not details.get("poster_url") and TMDB_API_KEY:
+            tmdb_details = await get_movie_detailsx(base_name)
+            if tmdb_details and not tmdb_details.get("error") and tmdb_details.get("poster_url"):
+                details = tmdb_details
 
         raw_genres = details.get("genres", "N/A")
         if isinstance(raw_genres, str):
