@@ -254,12 +254,20 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
     }
 
     if not movie_doc:
-        # Prefer IMDB first, fall back to TMDB if no poster
-        details = await get_movie_details(base_name) or {}
+        # Prefer IMDB, fall back to TMDB safely
+        details = {}
+        try:
+            details = await get_movie_details(base_name) or {}
+        except Exception:
+            details = {}
+
         if not details.get("poster_url") and TMDB_API_KEY:
-            tmdb_details = await get_movie_detailsx(base_name)
-            if tmdb_details and not tmdb_details.get("error") and tmdb_details.get("poster_url"):
-                details = tmdb_details
+            try:
+                tmdb_details = await get_movie_detailsx(base_name)
+                if tmdb_details and not tmdb_details.get("error") and tmdb_details.get("poster_url"):
+                    details = tmdb_details
+            except Exception:
+                pass
 
         raw_genres = details.get("genres", "N/A")
         if isinstance(raw_genres, str):
