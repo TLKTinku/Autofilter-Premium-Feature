@@ -385,27 +385,33 @@ async def get_posterx(query, bulk=False, id=False, file=None):
     
 
 async def get_poster_fallback(query, bulk=False, id=False, file=None):
-    """Try IMDB first. If no poster / error, fall back to TMDB."""
-    result = None
+    """
+    Robust poster fetcher.
+    1. Try IMDB first.
+    2. If IMDB fails or returns no poster → use TMDB.
+    Never crashes the bot.
+    """
+    # ---------- Try IMDB ----------
     try:
-        result = await get_poster(query, bulk=bulk, id=id, file=file)
-        if result and result.get("poster"):
-            return result
-    except Exception as e:
-        logger.warning(f"IMDB poster failed for '{query}': {e}")
-        result = None
+        imdb_result = await get_poster(query, bulk=bulk, id=id, file=file)
+        if imdb_result and imdb_result.get("poster"):
+            return imdb_result
+    except Exception:
+        pass  # Silently continue to TMDB
 
-    # Always try TMDB as fallback if we don't have a poster yet
-    if TMDB_API_KEY:
-        try:
-            tmdb_result = await get_posterx(query, bulk=bulk, id=id, file=file)
-            if tmdb_result and (tmdb_result.get("poster") or tmdb_result.get("backdrop")):
-                logger.info(f"Using TMDB fallback for '{query}'")
-                return tmdb_result
-        except Exception as e:
-            logger.warning(f"TMDB fallback also failed for '{query}': {e}")
+    # ---------- Fallback to TMDB ----------
+    if not TMDB_API_KEY:
+        return None
 
-    return result
+    try:
+        tmdb_result = await get_posterx(query, bulk=bulk, id=id, file=file)
+        if tmdb_result and (tmdb_result.get("poster") or tmdb_result.get("backdrop")):
+            return tmdb_result
+    except Exception:
+        pass
+
+    return None
+
 
 async def search_gagala(text):
     usr_agent = {
