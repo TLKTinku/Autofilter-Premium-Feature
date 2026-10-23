@@ -385,31 +385,43 @@ async def get_posterx(query, bulk=False, id=False, file=None):
     
 
 async def get_poster_fallback(query, bulk=False, id=False, file=None):
-    """
-    Robust poster fetcher.
-    1. Try IMDB first.
-    2. If IMDB fails or returns no poster → use TMDB.
-    Never crashes the bot.
-    """
-    # ---------- Try IMDB ----------
+    """Try IMDB first, fall back to TMDB. Always logs clearly."""
+    print(f"\n========== POSTER DEBUG ==========")
+    print(f"Query: {query}")
+    
+    # Try IMDB
+    print("Trying IMDB...")
     try:
         imdb_result = await get_poster(query, bulk=bulk, id=id, file=file)
         if imdb_result and imdb_result.get("poster"):
+            print("IMDB SUCCESS - poster found")
+            print("================================\n")
             return imdb_result
-    except Exception:
-        pass  # Silently continue to TMDB
+        else:
+            print("IMDB returned no poster")
+    except Exception as e:
+        print(f"IMDB ERROR: {e}")
 
-    # ---------- Fallback to TMDB ----------
+    # Fallback TMDB
+    print("Falling back to TMDB...")
     if not TMDB_API_KEY:
+        print("TMDB_API_KEY not set")
+        print("================================\n")
         return None
 
     try:
         tmdb_result = await get_posterx(query, bulk=bulk, id=id, file=file)
         if tmdb_result and (tmdb_result.get("poster") or tmdb_result.get("backdrop")):
+            print("TMDB SUCCESS")
+            print("================================\n")
             return tmdb_result
-    except Exception:
-        pass
+        else:
+            print("TMDB also no poster")
+    except Exception as e:
+        print(f"TMDB ERROR: {e}")
 
+    print("Both failed")
+    print("================================\n")
     return None
 
 
