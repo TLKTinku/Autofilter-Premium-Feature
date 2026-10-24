@@ -796,10 +796,10 @@ async def group_setting_buttons(grp_id):
                 InlineKeyboardButton('10' if settings["max_btn"] else f'{MAX_B_TN}', callback_data=f'setgs#max_btn#{settings["max_btn"]}#{grp_id}',),
             ],[
                 InlineKeyboardButton('ꜱᴘᴇʟʟ ᴄʜᴇᴄᴋ',callback_data=f'setgs#spell_check#{settings["spell_check"]}#{str(grp_id)}'),
-                ikb('✔ Oɴ' if settings["spell_check"] else '✘ Oғғ', callback_data=f'setgs#spell_check#{settings["spell_check"]}#{str(grp_id, style="success" if settings["spell_check"] else "danger")}')
+                ikb('✔ Oɴ' if settings["spell_check"] else '✘ Oғғ', callback_data=f'setgs#spell_check#{settings["spell_check"]}#{str(grp_id)}', style="success" if settings["spell_check"] else "danger")
             ],[
                 InlineKeyboardButton('Vᴇʀɪғʏ', callback_data=f'setgs#is_verify#{settings.get("is_verify", IS_VERIFY)}#{grp_id}'),
-                ikb('✔ Oɴ' if settings.get("is_verify", IS_VERIFY) else '✘ Oғғ', callback_data=f'setgs#is_verify#{settings.get("is_verify", IS_VERIFY, style="success" if settings.get("is_verify", IS_VERIFY) else "danger")}#{grp_id}'),
+                ikb('✔ Oɴ' if settings.get("is_verify", IS_VERIFY) else '✘ Oғғ', callback_data=f'setgs#is_verify#{settings.get("is_verify", IS_VERIFY)}#{grp_id}', style="success" if settings.get("is_verify", IS_VERIFY) else "danger"),
             ],
             [
                 InlineKeyboardButton("❌ Remove ❌ ", callback_data=f"removegrp#{grp_id}")
