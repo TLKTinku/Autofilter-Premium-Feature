@@ -1,4 +1,4 @@
-from utils import get_size, is_subscribed, is_req_subscribed, group_setting_buttons, get_poster, get_posterx, get_poster_fallback, temp, get_settings, save_group_settings, get_cap, imdb, is_check_admin, extract_request_content, log_error, clean_filename, generate_season_variations, clean_search_text, format_file_caption, extract_language, ikb
+from utils import get_size, is_subscribed, is_req_subscribed, group_setting_buttons, get_poster, get_posterx, temp, get_settings, save_group_settings, get_cap, imdb, is_check_admin, extract_request_content, log_error, clean_filename, generate_season_variations, clean_search_text, format_file_caption, extract_language, ikb
 import tracemalloc
 from fuzzywuzzy import process
 from dreamxbotz.util.file_properties import get_name, get_hash
@@ -646,7 +646,7 @@ async def _pro_render_detail(client, query, key, offset=0, push_history=True):
     meta = state.get("meta")
     if meta is None:
         try:
-            meta = await get_poster_fallback(title, file=getattr(files[0], "file_name", None))
+            meta = await get_poster(title, file=getattr(files[0], "file_name", None))
         except Exception:
             meta = None
         state["meta"] = meta or {}
@@ -1137,7 +1137,7 @@ async def advantage_spoll_choker(bot, query):
     _, id, user = query.data.split('#')
     if int(user) != 0 and query.from_user.id != int(user):
         return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
-    movies = await get_poster_fallback(id, id=True)
+    movies = await get_poster(id, id=True)
     movie = movies.get('title')
     movie = re.sub(r"[:-]", " ", movie)
     movie = re.sub(r"\s+", " ", movie).strip()
@@ -2771,7 +2771,7 @@ async def auto_filter(client, msg, spoll=False):
         imdb = None
         if settings.get('imdb'):
             try:
-                imdb = await get_poster_fallback(search, file=(files[0]).file_name)
+                imdb = await get_poster(search, file=(files[0]).file_name)
             except Exception:
                 imdb = None
 

@@ -6,7 +6,7 @@ from collections import defaultdict
 from plugins.Dreamxfutures.Imdbposter import get_movie_detailsx, fetch_image, get_movie_details
 from database.users_chats_db import db
 from pyrogram import Client, filters, enums
-from info import CHANNELS, MOVIE_UPDATE_CHANNEL, MOVIE_UPDATE_GROUP, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER, TMDB_API_KEY
+from info import CHANNELS, MOVIE_UPDATE_CHANNEL, MOVIE_UPDATE_GROUP, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER
 from Script import script
 from database.ia_filterdb import save_file
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -239,8 +239,6 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
         db.movie_updates = db.db.movie_updates
 
     movie_doc = await db.movie_updates.find_one({"_id": base_name})
-    global error_tmdb
-    error_tmdb=False
     file_data = {
         "filename": filename,
         "processed": processed,
@@ -254,20 +252,21 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
     }
 
     if not movie_doc:
-        # Prefer IMDB, fall back to TMDB safely
-        details = {}
-        try:
-            details = await get_movie_details(base_name) or {}
-        except Exception:
-            details = {}
-
-        if not details.get("poster_url") and TMDB_API_KEY:
+        # IMDB first; TMDB only if IMDB has no poster
+        details = await get_movie_details(base_name) or {}
+        if not details.get("poster_url"):
             try:
                 tmdb_details = await get_movie_detailsx(base_name)
-                if tmdb_details and not tmdb_details.get("error") and tmdb_details.get("poster_url"):
-                    details = tmdb_details
             except Exception:
-                pass
+                tmdb_details = None
+            if tmdb_details and not tmdb_details.get("error") and tmdb_details.get("poster_url"):
+                logger.info("IMDB poster not found, using TMDB poster")
+                details["poster_url"] = tmdb_details["poster_url"]
+                for k in ("genres", "rating", "year"):
+                    if not details.get(k) or details.get(k) == "N/A":
+                        details[k] = tmdb_details.get(k) or details.get(k)
+                if not details.get("url"):
+                    details["url"] = tmdb_details.get("tmdb_url", "")
 
         raw_genres = details.get("genres", "N/A")
         if isinstance(raw_genres, str):
@@ -275,15 +274,13 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
             genres = ", ".join(g for g in genre_list if g in STANDARD_GENRES) or "N/A"
         else:
             genres = ", ".join(g for g in raw_genres if g in STANDARD_GENRES) or "N/A"
-        # Use IMDB poster/url by default. Only use TMDB fields if we fell back to TMDB
-        is_tmdb = bool(details.get("tmdb_url"))
         movie_doc = {
             "_id": base_name,
             "files": [file_data],
-            "poster_url": details.get("poster_url") or details.get("backdrop_url"),
+            "poster_url": details.get("poster_url"),
             "genres": genres,
             "rating": details.get("rating", "N/A"),
-            "imdb_url": details.get("url") or details.get("tmdb_url") or "",
+            "imdb_url": details.get("url", ""),
             "year": media_info["year"] or details.get("year"),
             "tag": media_info["tag"],
             "ott_platform": media_info["ott_platform"],
