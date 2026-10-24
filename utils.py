@@ -143,8 +143,8 @@ async def users_broadcast(user_id, message, is_pin):
             await m.pin(both_sides=True)
         return True, "Success"
     except FloodWait as e:
-        await asyncio.sleep(e.x)
-        return await users_broadcast(user_id, message)
+        await asyncio.sleep(e.value)
+        return await users_broadcast(user_id, message, is_pin)
     except InputUserDeactivated:
         await db.delete_user(int(user_id))
         logging.info(f"{user_id}-Removed from Database, since deleted account.")
@@ -170,8 +170,8 @@ async def groups_broadcast(chat_id, message, is_pin):
                 pass
         return "Success"
     except FloodWait as e:
-        await asyncio.sleep(e.x)
-        return await groups_broadcast(chat_id, message)
+        await asyncio.sleep(e.value)
+        return await groups_broadcast(chat_id, message, is_pin)
     except Exception as e:
         await db.delete_chat(chat_id)
         return "Error"
@@ -226,11 +226,12 @@ async def add_name_to_db(filename):
     
     return await db.add_name(filename) 
 
-async def get_poster(query, bulk=False, id=False, file=None):
+async def _get_poster_imdb(query, bulk=False, id=False, file=None):
     if not id:
         query = (query.strip()).lower()
         title = query
         year = re.findall(r'[1-2]\d{3}$', query, re.IGNORECASE)
+        imdb
         if year:
             year = list_to_str(year[:1])
             title = (query.replace(year, "")).strip()
@@ -240,11 +241,7 @@ async def get_poster(query, bulk=False, id=False, file=None):
                 year = list_to_str(year[:1]) 
         else:
             year = None
-        try:
-            movieid = imdb.search_movie(title.lower(), results=10)
-        except Exception as e:
-            logger.warning(f"IMDB search failed: {e}")
-            return None
+        movieid = imdb.search_movie(title.lower(), results=10)
         if not movieid:
             return None
         if year:
@@ -320,6 +317,37 @@ async def get_poster(query, bulk=False, id=False, file=None):
         'url':f'https://www.imdb.com/title/tt{movieid}'
     }
     
+async def get_poster(query, bulk=False, id=False, file=None):
+    """IMDB first. TMDB is used ONLY when IMDB gives no poster (needs TMDB_API_KEY)."""
+    if bulk:
+        return await _get_poster_imdb(query, bulk=True, id=id, file=file)
+    try:
+        data = await _get_poster_imdb(query, bulk=False, id=id, file=file)
+    except Exception as e:
+        logger.error(f"IMDB poster fetch failed: {e}")
+        data = None
+    if data and data.get('poster'):
+        return data
+    if not TMDB_API_KEY:
+        return data
+    try:
+        title = (data or {}).get('title') or (None if id else str(query))
+        if not title:
+            return data
+        year = (data or {}).get('year')
+        tmdb_query = f"{title} {year}" if year else title
+        tmdb = await get_posterx(tmdb_query, file=file)
+        if tmdb and tmdb.get('poster'):
+            logger.info("IMDB poster not found, using TMDB poster")
+            if data:
+                data['poster'] = tmdb['poster']
+                data['backdrop'] = tmdb.get('backdrop')
+                return data
+            return tmdb
+    except Exception as e:
+        logger.error(f"TMDB poster fallback failed: {e}")
+    return data
+
 async def get_posterx(query, bulk=False, id=False, file=None):
     """
     Fetches movie details from TMDB using the get_movie_detailsx helper
@@ -383,48 +411,6 @@ async def get_posterx(query, bulk=False, id=False, file=None):
         'url': details.get('tmdb_url')
     }
     
-
-async def get_poster_fallback(query, bulk=False, id=False, file=None):
-    """Try IMDB first, fall back to TMDB. Always logs clearly."""
-    print(f"\n========== POSTER DEBUG ==========")
-    print(f"Query: {query}")
-    
-    # Try IMDB
-    print("Trying IMDB...")
-    try:
-        imdb_result = await get_poster(query, bulk=bulk, id=id, file=file)
-        if imdb_result and imdb_result.get("poster"):
-            print("IMDB SUCCESS - poster found")
-            print("================================\n")
-            return imdb_result
-        else:
-            print("IMDB returned no poster")
-    except Exception as e:
-        print(f"IMDB ERROR: {e}")
-
-    # Fallback TMDB
-    print("Falling back to TMDB...")
-    if not TMDB_API_KEY:
-        print("TMDB_API_KEY not set")
-        print("================================\n")
-        return None
-
-    try:
-        tmdb_result = await get_posterx(query, bulk=bulk, id=id, file=file)
-        if tmdb_result and (tmdb_result.get("poster") or tmdb_result.get("backdrop")):
-            print("TMDB SUCCESS")
-            print("================================\n")
-            return tmdb_result
-        else:
-            print("TMDB also no poster")
-    except Exception as e:
-        print(f"TMDB ERROR: {e}")
-
-    print("Both failed")
-    print("================================\n")
-    return None
-
-
 async def search_gagala(text):
     usr_agent = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -1156,7 +1142,7 @@ async def get_cap(settings, remaining_seconds, files, query, total_results, sear
                     )
             else:
                 if settings["imdb"]:
-                    imdb = await get_poster_fallback(search, file=(files[0]).file_name)
+                    imdb = await get_poster(search, file=(files[0]).file_name)
                 else:
                     imdb = None
                 if imdb:
