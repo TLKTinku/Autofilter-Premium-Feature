@@ -4,10 +4,6 @@ import os
 import asyncio
 import logging
 from pyrogram import Client, filters
-try:
-    import pyromod  # adds Client.listen() used below
-except Exception:
-    pass
 from pyrogram.errors.exceptions.bad_request_400 import MessageTooLong
 from pyrogram.errors import FloodWait
 from database.users_chats_db import db
