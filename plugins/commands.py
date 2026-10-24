@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 TIMEZONE = "Asia/Kolkata"
 BATCH_FILES = {}
 
+# Master switch: True = verification always OFF (ignores group/env settings). Set False to use settings again.
+VERIFY_FORCE_OFF = True
+
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
     if EMOJI_MODE:
@@ -284,7 +287,7 @@ async def start(client, message):
             settings = await get_settings(grp_id)
             is_second_shortener = await db.use_second_shortener(user_id, settings.get('verify_time', TWO_VERIFY_GAP)) 
             is_third_shortener = await db.use_third_shortener(user_id, settings.get('third_verify_time', THREE_VERIFY_GAP))
-            is_verify_setting = settings.get("is_verify", IS_VERIFY)
+            is_verify_setting = False if VERIFY_FORCE_OFF else settings.get("is_verify", IS_VERIFY)
             print(f"DEBUG VERIFY CHECK: grp_id={grp_id} is_verify_setting={is_verify_setting} user_verified={user_verified} is_second_shortener={is_second_shortener} is_third_shortener={is_third_shortener}")
             if is_verify_setting and (not user_verified or is_second_shortener or is_third_shortener):
                 verify_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=7))
