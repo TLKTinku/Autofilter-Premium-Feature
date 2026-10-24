@@ -115,12 +115,20 @@ async def start(client, message):
         m=await message.reply_text("⏳")
         await asyncio.sleep(0.4)
         await m.delete()        
-        await message.reply_photo(
-            photo=random.choice(PICS),
-            caption=home_text(message.from_user.mention),
-            reply_markup=reply_markup,
-            parse_mode=enums.ParseMode.HTML
-        )
+        try:
+            await message.reply_photo(
+                photo=random.choice(PICS),
+                caption=home_text(message.from_user.mention),
+                reply_markup=reply_markup,
+                parse_mode=enums.ParseMode.HTML
+            )
+        except Exception as e:
+            logger.error(f"/start photo failed ({e}), sending text instead")
+            await message.reply_text(
+                home_text(message.from_user.mention),
+                reply_markup=reply_markup,
+                parse_mode=enums.ParseMode.HTML
+            )
         return
 
     if len(message.command) == 2 and message.command[1] in ["subscribe", "error", "okay", "help"]:
@@ -140,12 +148,20 @@ async def start(client, message):
         m=await message.reply_text("⏳")
         await asyncio.sleep(0.4)
         await m.delete()        
-        await message.reply_photo(
-            photo=random.choice(PICS),
-            caption=home_text(message.from_user.mention),
-            reply_markup=reply_markup,
-            parse_mode=enums.ParseMode.HTML
-        )
+        try:
+            await message.reply_photo(
+                photo=random.choice(PICS),
+                caption=home_text(message.from_user.mention),
+                reply_markup=reply_markup,
+                parse_mode=enums.ParseMode.HTML
+            )
+        except Exception as e:
+            logger.error(f"/start photo failed ({e}), sending text instead")
+            await message.reply_text(
+                home_text(message.from_user.mention),
+                reply_markup=reply_markup,
+                parse_mode=enums.ParseMode.HTML
+            )
         return
     if message.command[1].startswith("reff_"):
         try:
@@ -291,9 +307,12 @@ async def start(client, message):
                     howtodownload = settings.get('tutorial_2', TUTORIAL_2) if is_second_shortener else settings.get('tutorial', TUTORIAL)
                 buttons = [[
                     InlineKeyboardButton(text="♻️ ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴠᴇʀɪꜰʏ ♻️", url=verify)
-                ],[
-                    InlineKeyboardButton(text="⁉️ ʜᴏᴡ ᴛᴏ ᴠᴇʀɪꜰʏ ⁉️", url=howtodownload)
                 ]]
+                # Tutorial button only if the link is a valid http(s) url (empty url => BUTTON_URL_INVALID)
+                if howtodownload and str(howtodownload).strip().startswith(("http://", "https://", "tg://")):
+                    buttons.append([
+                        InlineKeyboardButton(text="⁉️ ʜᴏᴡ ᴛᴏ ᴠᴇʀɪꜰʏ ⁉️", url=str(howtodownload).strip())
+                    ])
                 reply_markup=InlineKeyboardMarkup(buttons)
                 if await db.user_verified(user_id): 
                     msg = script.THIRDT_VERIFICATION_TEXT
